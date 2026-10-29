@@ -129,6 +129,7 @@ export const api = {
       `/api/timeline${qs({ view: q.view, kind: q.kind, q: q.q, important: q.important, archived: q.archived, place: q.place, album_id: q.album_id })}`,
     ),
   item: (id: number) => get<ItemDetail>(`/api/items/${id}`),
+  itemsByIds: (ids: number[]) => get<ItemsPage>(`/api/items?ids=${ids.join(',')}&limit=500`),
   stats: () => get<Stats>('/api/stats'),
   actions: (ids: number[], action: Action) => post<ActionResult>('/api/items/actions', { ids, action }),
 
