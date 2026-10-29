@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(auth.require_auth)])
 VIEWS = {"library": ("library", "archived"), "inbox": ("inbox",), "trash": ("trash",)}
 KINDS = ("photo", "video", "document", "audio", "other")
 _WORD = re.compile(r"\w+", re.UNICODE)
+_PART = re.compile(r"[^\W_]+", re.UNICODE)  # how the FTS tokenizer splits: "IMG_1234" -> img, 1234
 
 
 def _conn(request: Request) -> sqlite3.Connection:
@@ -27,8 +28,14 @@ def _conn(request: Request) -> sqlite3.Connection:
 
 
 def fts_query(q: str) -> str | None:
-    words = _WORD.findall(q)[:12]
-    return " ".join(f'"{w}"*' for w in words) if words else None
+    """'img_12 praia' -> '"img" + "12"* AND "praia"*': each typed word is a phrase of
+    its parts (so a file name matches in order), the last part as a prefix."""
+    terms = []
+    for word in _WORD.findall(q)[:12]:
+        parts = _PART.findall(word)
+        if parts:
+            terms.append(" + ".join(f'"{p}"' for p in parts) + "*")
+    return " AND ".join(terms) or None
 
 
 def _filters(view: str, kind: str, q: str | None, year: int | None, month: int | None,
@@ -131,11 +138,15 @@ def get_item(item_id: int, request: Request) -> dict:
         files = []
         for f in conn.execute("SELECT id, role, size_bytes, mime, rel_path FROM files WHERE item_id = ? "
                               "ORDER BY role = 'live-video'", (item_id,)):
-            vols = [r[0] for r in conn.execute(
-                "SELECT v.name FROM volume_copies vc JOIN volumes v ON v.id = vc.volume_id "
-                "WHERE vc.file_id = ? AND vc.verified_at IS NOT NULL ORDER BY v.name", (f["id"],))]
+            copies = conn.execute(
+                "SELECT v.id, v.name, vc.rel_path FROM volume_copies vc JOIN volumes v ON v.id = vc.volume_id "
+                "WHERE vc.file_id = ? AND vc.verified_at IS NOT NULL ORDER BY v.name", (f["id"],)).fetchall()
+            on_item_volume = next((c["rel_path"] for c in copies if c["id"] == row["volume_id"]), None)
             files.append({"id": f["id"], "role": f["role"], "size_bytes": f["size_bytes"], "mime": f["mime"],
-                          "on_server": f["rel_path"] is not None, "volumes": vols})
+                          "on_server": f["rel_path"] is not None, "volumes": [c["name"] for c in copies],
+                          # path on the drive (the item's volume, else the first one holding it)
+                          "rel_path": on_item_volume or (copies[0]["rel_path"] if copies else None),
+                          "drive_copies": [{"volume": c["name"], "rel_path": c["rel_path"]} for c in copies]})
         data["files"] = files
         data["suggestions"] = [dict(r) for r in conn.execute(
             "SELECT s.id, s.kind FROM suggestions s JOIN suggestion_items si ON si.suggestion_id = s.id "
@@ -306,9 +317,17 @@ def stats(request: Request) -> dict:
         "disk_free_bytes": usage.free_bytes,
         "used_pct": usage.used_pct,
         "alert": usage.used_pct >= cfg.storage_alert_pct or server_bytes >= budget,
-        "weeks_to_next_drive": round(max(0, budget - server_bytes) / weekly, 1) if weekly > 0 else None,
+        "weeks_to_next_drive": _weeks(budget - server_bytes, weekly),
     }
     return data
+
+
+def _weeks(remaining: int, weekly: float) -> float | None:
+    """Weeks until the batch budget fills, at the last 4 weeks' pace; None if > 2 years or unknown."""
+    if weekly <= 0:
+        return None
+    weeks = max(0, remaining) / weekly
+    return round(weeks, 1) if weeks <= 104 else None
 
 
 @router.get("/daily")

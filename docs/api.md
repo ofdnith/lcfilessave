@@ -70,7 +70,8 @@ Na lixeira a ordem é por `trashed_at`.
 **`GET /api/timeline`** — mesmos filtros (`view`, `kind`, `q`, `important`, `archived`).
 Resposta: `{months: [{year, month, count}]}` do mais recente ao mais antigo.
 
-**`GET /api/items/{id}`** — `Item` + `files: [{id, role, size_bytes, mime, on_server, volumes: ["VOLUME-001"]}]`
+**`GET /api/items/{id}`** — `Item` + `files: [{id, role, size_bytes, mime, on_server, volumes: ["VOLUME-001"], rel_path, drive_copies: [{volume, rel_path}]}]`
+(`rel_path` = caminho do arquivo no HD do item, para abrir o original com o HD plugado)
 + `suggestions: [{id, kind}]`.
 
 **`GET /api/items/{id}/thumb`** — WebP 320 px. 404 se ainda não existe.
@@ -89,7 +90,7 @@ são servidos direto; HEIC e outros viram JPEG 1600 px). Para vídeo, o próprio
   "storage": {
     "server_bytes": 62000000000, "budget_bytes": 80000000000,
     "disk_total_bytes": 0, "disk_free_bytes": 0, "used_pct": 62.0, "alert": false,
-    "weeks_to_next_drive": 2.1
+    "weeks_to_next_drive": 2.1   // null se desconhecido ou acima de 2 anos
   },
   "daily_backup": {"last_at": "…", "overdue": false}
 }
