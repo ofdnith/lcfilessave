@@ -331,3 +331,10 @@ def test_cancel_unfreezes_the_old_server(cfg):
         assert a.post("/api/albums", json={"name": "x"}).status_code == 423
         migrate.cancel(src)
         assert a.post("/api/albums", json={"name": "x"}).status_code == 200
+
+
+def test_fetch_several_items_by_id(api, tmp_path):
+    ids = [api.upload(make_jpeg(tmp_path / f"IMG_{i}.JPG", color=(i * 70, 3, 3)))["item_id"] for i in range(3)]
+    api.act([ids[0]], "keep")
+    got = api.get("/api/items", params={"ids": f"{ids[0]},{ids[2]}"}).json()
+    assert sorted(i["id"] for i in got["items"]) == sorted([ids[0], ids[2]])

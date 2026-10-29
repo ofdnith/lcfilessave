@@ -39,8 +39,13 @@
     pickedTotal = ids.length;
     picked = [];
     const want = ids.slice(0, PICK_LIMIT);
-    const got = await Promise.allSettled(want.map((id) => api.item(id)));
-    picked = got.flatMap((r) => (r.status === 'fulfilled' ? [r.value as Item] : []));
+    try {
+      const page = await api.itemsByIds(want);
+      const byId = new Map(page.items.map((it) => [it.id, it]));
+      picked = want.flatMap((id) => (byId.has(id) ? [byId.get(id) as Item] : []));
+    } catch {
+      picked = [];
+    }
     picking = false;
     requestAnimationFrame(() => document.getElementById('picked')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }

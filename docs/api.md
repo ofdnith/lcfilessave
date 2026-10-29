@@ -290,13 +290,16 @@ importantes primeiro). `years` vazio quando não há nada.
 | POST | `/api/albums/{id}/items/remove` | `{ids}` | `{removed}` |
 
 `Album = {id, name, count, cover: Item|null, created_at, updated_at}`.
-`GET /api/items?album_id=N` e `/api/timeline?album_id=N` filtram pelo álbum (qualquer `view`).
+`GET /api/items?album_id=N` e `/api/timeline?album_id=N` filtram pelo álbum e ignoram `view`:
+mostram o que está na Entrada, no Acervo e nos HDs (o que está na lixeira não aparece).
+`GET /api/items?ids=1,2,3` (até 500) traz vários itens de uma vez, em qualquer estado menos lixeira.
 `GET /api/items/{id}` traz `albums: [{id, name}]`.
 
 ## Atalhos do iPhone sem complicação
 
 - `GET /api/tokens` → `{tokens: [{id, label, created_at, last_used_at}]}`
-- `POST /api/tokens` `{label}` → `{id, token}` (o token só aparece nessa resposta)
+- `POST /api/tokens` `{label}` → `{id, token}` (o token só aparece nessa resposta); 409 se o
+  servidor ainda não tem senha ("Defina uma senha…"), 403 fora de casa no modo seguro
 - `DELETE /api/tokens/{id}` → `{ok}`
 - `GET /api/shortcuts` → `{links: {manual: url|null, daily: url|null}}` — links do iCloud
   dos atalhos prontos, configurados no `acervo.toml` (`shortcut_manual_url`, `shortcut_daily_url`).

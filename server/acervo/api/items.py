@@ -79,10 +79,16 @@ def _filters(view: str, kind: str, q: str | None, year: int | None, month: int |
 def list_items(request: Request, view: str = "library", kind: str = "all", q: str | None = None,
                year: int | None = None, month: int | None = Query(None, ge=1, le=12),
                start: str | None = None, important: int | None = None, archived: int | None = None,
-               place: str | None = None, album_id: int | None = None,
+               place: str | None = None, album_id: int | None = None, ids: str | None = None,
                cursor: str | None = None, limit: int = Query(200, ge=1, le=500)) -> dict:
     cfg = request.app.state.config
     where, args = _filters(view, kind, q, year, month, important, archived, place, album_id)
+    if ids:
+        wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:500]
+        if not wanted:
+            raise HTTPException(400, "ids inválidos")
+        where = ["i.state IN ('inbox', 'library', 'archived')", f"i.id IN ({','.join('?' * len(wanted))})"]
+        args = wanted
     order_col = "i.trashed_at" if view == "trash" else "i.captured_at"
     total_where, total_args = list(where), list(args)
     if start:

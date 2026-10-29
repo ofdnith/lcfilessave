@@ -6,8 +6,13 @@ iPhone e dentro do app do Mac (Tauri). As telas Dispositivos e Esvaziar iPhone
 só aparecem dentro do app do Mac (quando `window.__TAURI__` existe).
 
 Dependências: só `svelte`, `vite`, `typescript`, `svelte-check`,
-`tus-js-client` (envio retomável) e `hash-wasm` (SHA-256 no navegador). Tudo em
+`tus-js-client` (envio retomável), `hash-wasm` (SHA-256 no navegador) e
+`leaflet` (mapa de Lugares, carregado só quando a tela abre). Tudo em
 JavaScript puro; instala também no Termux (Android ARM64).
+
+O mapa usa os mapas do OpenStreetMap, baixados direto pelo aparelho que olha
+(o servidor não manda nada para fora). Sem internet, os pontos e a lista de
+lugares continuam funcionando.
 
 ## Desenvolver
 
@@ -51,6 +56,9 @@ python3 scripts/make-icons.py   # precisa do Pillow
 - `src/lib/devices.svelte.ts` — HDs, transferência verificada e verificação de saúde
 - `src/lib/empty-iphone.svelte.ts` — fluxo Esvaziar iPhone
 - `src/views/` — telas; `src/components/` — peças reaproveitadas
-- `public/sw.js` — service worker (só a casca do app; nunca guarda `/api`)
+- `src/lib/albums.svelte.ts`, `src/lib/sheets.svelte.ts` — álbuns e as folhas de confirmação/escolha de álbum
+- `src/lib/cluster.ts` — agrupamento dos pontos do mapa (grade simples, sem plugin)
+- `src/lib/push.ts` — avisos (Web Push) no web app instalado
+- `public/sw.js` — service worker: casca do app (nunca guarda `/api`) e avisos
 
 As rotas usam `#/` (ex.: `/#/entrada`), então o servidor só precisa entregar `/`.
