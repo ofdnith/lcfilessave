@@ -127,6 +127,8 @@ export interface Session {
   failed_count: number;
   summary_text: string;
   safe_to_delete: boolean;
+  /** files the owner had discarded before (counted, but shown apart) */
+  discarded_count?: number;
 }
 
 export interface PrecheckEntry {
@@ -153,6 +155,8 @@ export type UploadStatus =
   | 'in_trash'
   | 'discarded'
   | 'attached'
+  | 'restored'
+  | 'processing'
   | 'failed';
 
 export interface UploadResult {

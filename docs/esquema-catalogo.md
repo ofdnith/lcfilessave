@@ -1,7 +1,10 @@
 # Esquema do catálogo (`catalogo.db`)
 
 O catálogo é um SQLite com busca FTS5. O SQL fica em
-[`server/acervo/migrations/`](../server/acervo/migrations/) (`0001_initial.sql`, `0002_uploads_auth_storage.sql`).
+[`server/acervo/migrations/`](../server/acervo/migrations/) (`0001_initial.sql`, `0002_uploads_auth_storage.sql`, `0003_healthy_drive_copies.sql`).
+Na versão 3, uma cópia em HD só conta enquanto estiver saudável: se falhar numa
+verificação de saúde (ou o HD estiver marcado com problema), o servidor volta a
+não poder apagar a cópia dele.
 Nomes de tabelas e colunas estão em inglês (regra do projeto); abaixo, a tradução.
 
 ## Princípios

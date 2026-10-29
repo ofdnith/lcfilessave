@@ -15,7 +15,8 @@ from .config import CERTS_DIR, GEO_DIR, Config, load_config
 from .ingest import Ingestor, reconcile
 from .jobs import Worker
 from .places import Gazetteer
-from .storage import ensure_layout
+from .api.uploads import recover_uploads
+from .storage import ensure_layout, lock_data_dir
 
 log = logging.getLogger(__name__)
 
@@ -41,8 +42,10 @@ def create_app(cfg: Config) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        lock = lock_data_dir(cfg)
         prepare(cfg)
         report = reconcile(cfg, ingestor)
+        report["uploads_recovered"] = recover_uploads(cfg, ingestor)
         app.state.reconcile_report = report
         if cfg.workers:
             worker.start()
@@ -52,6 +55,7 @@ def create_app(cfg: Config) -> FastAPI:
         if cfg.workers:
             worker.stop()
         exiftool.close()
+        lock.close()
 
     app = FastAPI(title="Acervo", version=__version__, lifespan=lifespan,
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")

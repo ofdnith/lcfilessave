@@ -98,7 +98,8 @@ def free_rel_path(conn: sqlite3.Connection, cfg: Config, root: str, directory: s
     while True:
         candidate = name if n == 1 else (f"{stem}_{n}.{ext}" if ext else f"{stem}_{n}")
         rel = f"{directory}/{candidate}"
-        taken = conn.execute("SELECT 1 FROM files WHERE rel_path = ?", (rel,)).fetchone()
+        taken = conn.execute("SELECT 1 FROM files WHERE rel_path = ?", (rel,)).fetchone() or conn.execute(
+            "SELECT 1 FROM volume_copies WHERE rel_path = ?", (drive_rel_path(rel),)).fetchone()
         on_disk = (cfg.root_dir(root) / rel).exists() or (
             cfg.sd_dir is not None and (cfg.sd_dir / rel).exists()) or (cfg.data_dir / rel).exists()
         if not taken and not on_disk:

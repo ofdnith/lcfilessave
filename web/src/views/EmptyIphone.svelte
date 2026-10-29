@@ -53,6 +53,9 @@
             <div>
               <p class="big num">{num(s.received_verified_count)} de {num(expected)} recebidos e verificados</p>
               <p>Seguro apagar do iPhone. Apague pelo app Fotos do iPhone quando quiser; o Acervo nunca apaga nada do iPhone.</p>
+              {#if s.discarded_count}
+                <p class="hint">{num(s.discarded_count)} desses você já tinha descartado antes no Acervo, por isso não estão guardados.</p>
+              {/if}
             </div>
           </div>
         {:else}

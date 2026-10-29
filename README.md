@@ -54,7 +54,7 @@ Sem senha definida, o servidor só aceita este computador.
 ### Testes
 
 ```bash
-scripts/test.sh            # servidor: 78 testes
+scripts/test.sh            # servidor: 99 testes
 cd web && npm run check    # interface: verificação de tipos
 cd mac/src-tauri && cargo test
 ```
@@ -63,6 +63,9 @@ Os testes do servidor incluem os cinco obrigatórios da especificação (mesmo
 arquivo com nome diferente; mesmo nome com conteúdo diferente; arquivo já
 arquivado em HD; upload interrompido e retomado; dois uploads simultâneos) e
 conferem que o próprio banco recusa apagar um arquivo sem cópia verificada.
+Uma revisão independente de segurança dos dados encontrou 19 problemas (dois
+deles podiam apagar a única cópia de uma foto); todos foram corrigidos e cada um
+virou um teste em `server/tests/test_review_regressions.py`.
 
 Medido aqui: 500 fotos enviadas em ~6 s, miniaturas em ~22 s (no Realme, espere
 uns 3–5× mais), triagem de 500 itens em 0,4 s, busca em ~10 ms.

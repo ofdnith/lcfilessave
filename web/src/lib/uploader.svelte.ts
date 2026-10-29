@@ -347,6 +347,8 @@ export const statusText: Record<UploadStatus, string> = {
   in_trash: 'Está na lixeira',
   discarded: 'Descartado antes',
   attached: 'Juntado à Live Photo',
+  restored: 'Recuperado',
+  processing: 'Processando',
   failed: 'Falhou',
 };
 

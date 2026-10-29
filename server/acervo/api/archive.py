@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 
@@ -127,7 +128,7 @@ def archive_plan(request: Request, volume_id: str, max_bytes: int | None = None)
             files = conn.execute(
                 "SELECT f.id, f.item_id, f.sha256, f.size_bytes, f.rel_path FROM files f WHERE f.item_id = ? "
                 "AND NOT EXISTS (SELECT 1 FROM volume_copies vc WHERE vc.file_id = f.id AND vc.volume_id = ? "
-                "AND vc.verified_at IS NOT NULL)", (it["id"], volume_id)).fetchall()
+                "AND vc.verified_at IS NOT NULL AND coalesce(vc.last_check_ok, 1) = 1)", (it["id"], volume_id)).fetchall()
             size = sum(f["size_bytes"] for f in files)
             if not files:
                 continue
@@ -206,42 +207,50 @@ class Commit(BaseModel):
     volume_id: str
 
 
+_commit_lock = threading.Lock()
+
+HEALTHY = "vc.verified_at IS NOT NULL AND coalesce(vc.last_check_ok, 1) = 1 AND hv.status <> 'problem'"
+
+
 def _commit(cfg, volume_id: str) -> dict:
-    conn = db.connect(cfg.db_path)
-    archived, freed, to_delete = 0, 0, []
-    try:
-        _volume(conn, volume_id)
-        ready = conn.execute(
-            """SELECT i.id FROM items i
-               WHERE i.state = 'library'
-                 AND NOT EXISTS (
-                     SELECT 1 FROM files f WHERE f.item_id = i.id AND (
-                         f.rel_path IS NULL
-                         OR NOT EXISTS (SELECT 1 FROM volume_copies vc WHERE vc.file_id = f.id
-                                        AND vc.volume_id = :vid AND vc.verified_at IS NOT NULL)
-                         OR (SELECT count(DISTINCT vc.volume_id) FROM volume_copies vc
-                             WHERE vc.file_id = f.id AND vc.verified_at IS NOT NULL) < :copies))""",
-            {"vid": volume_id, "copies": cfg.archive_copies}).fetchall()
-        for it in ready:
-            files = conn.execute("SELECT id, sha256, rel_path, root, size_bytes FROM files WHERE item_id = ?",
-                                 (it["id"],)).fetchall()
-            with transaction(conn):
-                conn.execute("UPDATE items SET state = 'archived', volume_id = ? WHERE id = ?", (volume_id, it["id"]))
+    """Archive every library item whose files all have enough HEALTHY verified drive
+    copies (one of them on this volume), then drop the server copies."""
+    archived, freed = 0, 0
+    with _commit_lock:  # a retried request never runs alongside the first one
+        conn = db.connect(cfg.db_path)
+        try:
+            _volume(conn, volume_id)
+            ready_sql = f"""SELECT i.id FROM items i
+                WHERE i.state = 'library' {{only}}
+                  AND NOT EXISTS (
+                      SELECT 1 FROM files f WHERE f.item_id = i.id AND (
+                          f.rel_path IS NULL
+                          OR NOT EXISTS (SELECT 1 FROM volume_copies vc JOIN volumes hv ON hv.id = vc.volume_id
+                                         WHERE vc.file_id = f.id AND vc.volume_id = :vid AND {HEALTHY})
+                          OR (SELECT count(DISTINCT vc.volume_id) FROM volume_copies vc
+                              JOIN volumes hv ON hv.id = vc.volume_id
+                              WHERE vc.file_id = f.id AND {HEALTHY}) < :copies))"""
+            params = {"vid": volume_id, "copies": cfg.archive_copies}
+            for it in conn.execute(ready_sql.format(only=""), params).fetchall():
+                with transaction(conn):
+                    # Re-check inside the write transaction: state may have changed meanwhile.
+                    if not conn.execute(ready_sql.format(only="AND i.id = :iid"), {**params, "iid": it["id"]}).fetchone():
+                        continue
+                    files = conn.execute("SELECT id, sha256, rel_path, root, size_bytes FROM files WHERE item_id = ?",
+                                         (it["id"],)).fetchall()
+                    conn.execute("UPDATE items SET state = 'archived', volume_id = ? WHERE id = ?", (volume_id, it["id"]))
+                    for f in files:
+                        conn.execute("UPDATE files SET rel_path = NULL WHERE id = ?", (f["id"],))
+                        log_event(conn, "mac-app", "archive-remove-server-copy", item_id=it["id"], file_id=f["id"],
+                                  volume_id=volume_id, sha256=f["sha256"], from_path=f"{f['root']}:{f['rel_path']}")
+                # After COMMIT. If we die before unlinking, reconcile() removes the
+                # leftover: its hash belongs to a file with a healthy drive copy.
+                archived += 1
                 for f in files:
-                    conn.execute("UPDATE files SET rel_path = NULL WHERE id = ?", (f["id"],))
-                    log_event(conn, "mac-app", "archive-remove-server-copy", item_id=it["id"], file_id=f["id"],
-                              volume_id=volume_id, sha256=f["sha256"], from_path=f"{f['root']}:{f['rel_path']}")
-            archived += 1
-            for f in files:
-                to_delete.append(cfg.root_dir(f["root"]) / f["rel_path"])
-                freed += f["size_bytes"]
-            # After COMMIT. If we die before unlinking, reconcile() removes the
-            # leftover: its hash belongs to a file verified on a drive.
-            for p in to_delete:
-                p.unlink(missing_ok=True)
-            to_delete.clear()
-    finally:
-        conn.close()
+                    (cfg.root_dir(f["root"]) / f["rel_path"]).unlink(missing_ok=True)
+                    freed += f["size_bytes"]
+        finally:
+            conn.close()
     return {"archived_items": archived, "freed_bytes": freed}
 
 
