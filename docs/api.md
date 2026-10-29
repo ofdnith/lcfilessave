@@ -91,7 +91,16 @@ são servidos direto; HEIC e outros viram JPEG 1600 px). Para vídeo, o próprio
   "storage": {
     "server_bytes": 62000000000, "budget_bytes": 80000000000,
     "disk_total_bytes": 0, "disk_free_bytes": 0, "used_pct": 62.0, "alert": false,
-    "weeks_to_next_drive": 2.1   // null se desconhecido ou acima de 2 anos
+    "weeks_to_next_drive": 2.1,  // null se desconhecido ou acima de 2 anos
+    "inbox_bytes": 41000000000, "inbox_max_bytes": 100000000000,  // null = sem limite
+    "inbox_alert": false,        // Entrada passou de 90% do limite
+    "sd": {                      // null se não há sd_dir
+      "present": true, "for_library": true,
+      "total_bytes": 0, "free_bytes": 0, "used_pct": 71.0,
+      "library_bytes": 0,        // Acervo que já está no cartão
+      "pending_bytes": 0,        // Acervo ainda só na memória interna (sendo copiado)
+      "alert": false             // cartão ausente ou acima de storage_alert_pct: hora de um lote para o HD
+    }
   },
   "daily_backup": {"last_at": "…", "overdue": false}
 }
@@ -236,8 +245,10 @@ Fluxo da transferência:
 
 ## Outros
 
-- `GET /api/health` — sem login. Estado do servidor, catálogo e disco.
-- `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version}`.
+- `GET /api/health` — sem login. Estado do servidor, catálogo e disco; `storage` traz os mesmos
+  campos de Entrada e cartão de `/api/stats`, e `thermal` = `{temperature, max_temp_c, paused}`.
+- `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version, battery,
+  inbox_max_gb, sd_for_library, thermal}`.
 - `GET /ca.crt` — certificado para instalar no iPhone/Mac quando o HTTPS próprio está ativo.
 
 ---

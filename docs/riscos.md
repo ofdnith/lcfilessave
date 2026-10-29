@@ -15,7 +15,8 @@ Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código
 | 9 | exFAT sem journaling | App do Mac grava `.part`, `fsync`, renomeia e relê o hash |
 | 10 | Miniaturas crescendo | WebP 400 px (~20 KB); prévias grandes são cache descartável |
 | 11 | HEIC no Termux | `pillow-heif` se instalar; senão a prévia embutida via exiftool |
-| 12 | Bateria sempre na tomada | Checklist do instalador; bateria visível em Ajustes |
+| 12 | Bateria sempre na tomada | Checklist do instalador; tarefas pausam acima de `max_temp_c`; OCR leve |
+| 13 | Cartão microSD falhar | O cartão é uma cópia só do que foi triado — passe lotes para o HD com frequência |
 
 ## 1. Um único HD é uma única cópia — **decisão do dono**
 
@@ -128,3 +129,20 @@ Um celular carregando 24 h por dia pode inchar a bateria.
 
 **Proposta:** ativar o limite de carga do Realme, se existir; o `instalar.sh`
 lembra disso, e o servidor mostra a temperatura e o nível da bateria (Fase 3).
+
+**Tratamento:** carregando, o OCR rodaria sem parar numa importação grande. Por
+isso as tarefas de fundo pausam com a bateria a `max_temp_c` (40 °C por padrão)
+e só voltam 3 °C abaixo; o OCR lê uma cópia de 1600 px em tons de cinza, com
+um núcleo, em vez do original de 12–48 MP. `acervo-ctl status` mostra a temperatura.
+
+## 13. O cartão microSD é uma cópia só
+
+Com `sd_for_library = true`, o que passa pela triagem sai da memória interna e
+fica **só no cartão** até ir para um HD. Isso protege contra perder o celular,
+mas cartões falham mais que memória interna (desgaste, contato, falsificados).
+
+**Tratamento:** a cópia para o cartão relê e confere o SHA-256 antes de apagar
+a interna; o cartão leva uma cópia diária do catálogo (`acervo-resgate/`) e um
+`LEIA-ME.txt`. Use cartão de marca (A1/A2, U3) em armazenamento portátil exFAT —
+**nunca** "formatar como memória interna", que o deixa ilegível fora do
+celular — e mande lotes para o HD sem esperar o cartão encher.

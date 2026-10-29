@@ -96,8 +96,23 @@ export interface Stats {
     used_pct: number;
     alert: boolean;
     weeks_to_next_drive: number | null;
+    inbox_bytes: number;
+    inbox_max_bytes: number | null;
+    inbox_alert: boolean;
+    sd: SdStatus | null;
   };
   daily_backup: { last_at: string | null; overdue: boolean };
+}
+
+export interface SdStatus {
+  present: boolean;
+  for_library: boolean;
+  total_bytes: number | null;
+  free_bytes: number | null;
+  used_pct: number | null;
+  library_bytes: number;
+  pending_bytes: number;
+  alert: boolean;
 }
 
 export type Action = 'keep' | 'discard' | 'restore' | 'important' | 'unimportant';

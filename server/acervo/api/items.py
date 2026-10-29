@@ -438,6 +438,7 @@ def stats(request: Request) -> dict:
             "inbox_tabs": _tab_stats(conn, ("inbox",)),
             "daily_backup": daily_status(conn),
         }
+        summary = library.storage_summary(cfg, conn)
     finally:
         conn.close()
     usage = disk_usage(cfg.data_dir)
@@ -451,6 +452,7 @@ def stats(request: Request) -> dict:
         "used_pct": usage.used_pct,
         "alert": usage.used_pct >= cfg.storage_alert_pct or server_bytes >= budget,
         "weeks_to_next_drive": _weeks(budget - server_bytes, weekly),
+        **summary,
     }
     return data
 
@@ -477,5 +479,11 @@ def settings(request: Request) -> dict:
     cfg = request.app.state.config
     return {"archive_batch_gb": cfg.archive_batch_gb, "trash_days": cfg.trash_days,
             "archive_copies": cfg.archive_copies, "server_name": cfg.server_name, "version": __version__,
-            "battery": power.battery()}
+            "battery": power.battery(), "inbox_max_gb": cfg.inbox_max_gb,
+            "sd_for_library": cfg.sd_for_library, "thermal": _thermal(request)}
+
+
+def _thermal(request: Request) -> dict | None:
+    worker = getattr(request.app.state, "worker", None)
+    return worker.thermal.status() if worker is not None else None
 
