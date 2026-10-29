@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Acervo: a stack of archived frames with an amber drive label. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e2731"/>
+      <stop offset="1" stop-color="#10151c"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="132" y="112" width="248" height="40" rx="14" fill="#3a4757"/>
+  <rect x="112" y="166" width="288" height="44" rx="16" fill="#56677a"/>
+  <rect x="92" y="224" width="328" height="196" rx="26" fill="#e9eef3"/>
+  <path d="M92 380l86-86 64 64 44-44 134 102v4a26 26 0 0 1-26 26H118a26 26 0 0 1-26-26z" fill="#9fadbb"/>
+  <circle cx="346" cy="282" r="26" fill="#f0b44c"/>
+  <rect x="92" y="224" width="22" height="196" rx="0" fill="#f0b44c"/>
+</svg>
