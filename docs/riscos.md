@@ -1,7 +1,21 @@
 # Riscos do plano
 
-Ordenados pelo estrago que podem causar. Cada um tem uma proposta; os marcados
-com **decisão do dono** precisam da sua resposta.
+Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código.
+
+| # | Risco | Situação |
+|---|---|---|
+| 1 | Um HD só é uma cópia só | Opção `archive_copies = 2` pronta; o padrão é 1 — **decisão do dono** |
+| 2 | Camada 1 dizer "já tenho" por engano | Resolvido: "seguro apagar" exige hash de cada arquivo |
+| 3 | Descartadas voltando todo dia | Resolvido: estado `purged` guarda o hash |
+| 4 | `pydantic-core` no Termux | Instalador tenta o pacote pronto e, se faltar, compila |
+| 5 | PWA exige HTTPS | Resolvido: autoridade de certificado própria (`acervo certificado`) |
+| 6 | Limites dos Atalhos | Documentado em `docs/iphone.md`; Live Photo completa só pelo Mac |
+| 7 | Copyparty + FastAPI | Resolvido: upload retomável próprio (tus) dentro do FastAPI |
+| 8 | Dados apagados se o Termux sair | Avisos no instalador + cópia diária do catálogo |
+| 9 | exFAT sem journaling | App do Mac grava `.part`, `fsync`, renomeia e relê o hash |
+| 10 | Miniaturas crescendo | WebP 400 px (~20 KB); prévias grandes são cache descartável |
+| 11 | HEIC no Termux | `pillow-heif` se instalar; senão a prévia embutida via exiftool |
+| 12 | Bateria sempre na tomada | Checklist do instalador; bateria visível em Ajustes |
 
 ## 1. Um único HD é uma única cópia — **decisão do dono**
 
@@ -47,8 +61,9 @@ pouco, porque já evito recursos exclusivos do FastAPI.
 Sem HTTPS, o Safari não ativa o *service worker*: o web app até vai para a tela
 inicial, mas não funciona como app (sem cache, sem modo offline).
 
-**Proposta:** usar sempre o endereço HTTPS do Tailscale (`*.ts.net`, com
-certificado gratuito), inclusive dentro de casa. Isso também resolve a regra 7.
+**Tratamento:** o app Tailscale do Android não emite certificados, então o
+Acervo tem a própria autoridade de certificado (`acervo certificado`). Você
+instala o `ca.crt` uma vez no iPhone e no Mac, e o HTTPS vale em casa e pelo Tailscale.
 
 ## 6. Atalhos do iPhone têm limites
 

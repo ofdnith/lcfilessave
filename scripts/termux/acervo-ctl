@@ -1,0 +1,66 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Controle do Acervo no Realme.
+#   acervo-ctl start | stop | restart | status | logs
+#   acervo-ctl senha | token NOME | cidades | verificar | atualizar
+set -uo pipefail
+
+REPO="$HOME/acervo"
+DATA="$HOME/acervo-dados"
+CONF="$REPO/acervo.toml"
+ACERVO="$REPO/server/.venv/bin/acervo --config $CONF"
+PIDFILE="$DATA/supervisor.pid"
+LOG="$DATA/logs/servidor.log"
+
+running() { [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+case "${1:-status}" in
+  start)
+    if running; then echo "Já está rodando."; exit 0; fi
+    termux-wake-lock 2>/dev/null || true
+    mkdir -p "$DATA/logs"
+    nohup bash "$REPO/scripts/termux/supervisor.sh" >/dev/null 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "Acervo iniciado."
+    ;;
+  stop)
+    if running; then
+      pid="$(cat "$PIDFILE")"
+      kill "$pid" 2>/dev/null
+      pkill -TERM -f "acervo --config $CONF serve" 2>/dev/null
+      rm -f "$PIDFILE"
+      echo "Acervo parado."
+    else
+      echo "Não estava rodando."
+    fi
+    termux-wake-unlock 2>/dev/null || true
+    ;;
+  restart) "$0" stop; sleep 2; "$0" start ;;
+  status)
+    if running; then echo "Supervisor: rodando (pid $(cat "$PIDFILE"))"; else echo "Supervisor: parado"; fi
+    proto=http; grep -q '^https = true' "$CONF" 2>/dev/null && proto=https
+    if curl -ksf "$proto://127.0.0.1:8765/api/health" -o /tmp/acervo-health.json 2>/dev/null; then
+      python - <<'EOF'
+import json
+h = json.load(open("/tmp/acervo-health.json"))
+s = h["storage"]
+print(f"Servidor: {'OK' if h['status'] == 'ok' else 'COM PROBLEMA'} · versão {h['version']}")
+print(f"Disco: {s['free_bytes']/1e9:.1f} GB livres de {s['total_bytes']/1e9:.0f} GB ({s['used_pct']}% usado)")
+print("Ferramentas: " + ", ".join(f"{k} {'✓' if v else '✗'}" for k, v in h["tools"].items()))
+for p in h["problems"]:
+    print("  ! " + p)
+EOF
+    else
+      echo "Servidor: não responde"
+      exit 1
+    fi
+    ;;
+  logs) tail -n 80 -f "$LOG" ;;
+  senha) $ACERVO senha && echo "Reinicie com: acervo-ctl restart" ;;
+  token) $ACERVO token criar "${2:-iPhone}" ;;
+  cidades) $ACERVO baixar-cidades ;;
+  verificar) $ACERVO verificar ;;
+  atualizar)
+    cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/termux/instalar.sh"
+    ;;
+  *) sed -n '2,4p' "$0"; exit 2 ;;
+esac

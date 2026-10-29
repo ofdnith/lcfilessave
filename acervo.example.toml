@@ -1,22 +1,39 @@
 # Configuração do Acervo.
 # Copie para acervo.toml e ajuste. O acervo.toml não vai para o Git.
 # Caminhos relativos são contados a partir da pasta deste arquivo.
+# No Realme, o instalar.sh cria o acervo.toml sozinho.
 
 # Onde ficam os arquivos e o catálogo.
-# No Mac (desenvolvimento): uma pasta de teste dentro do projeto.
-# No Realme (Fase 3): o instalar.sh define o caminho certo.
 data_dir = "dev-dados"
 
-# Endereço e porta. Por enquanto só 127.0.0.1 (este computador):
-# o acesso pela rede exige senha, que chega na Fase 3.
+# Endereço e porta. "127.0.0.1" = só este computador.
+# "0.0.0.0" = rede local e Tailscale; exige senha (acervo senha).
 host = "127.0.0.1"
 port = 8765
 
-# Mostrar alerta quando o disco passar desta porcentagem.
+# Nome mostrado na interface.
+server_name = "Acervo (Mac)"
+
+# HTTPS próprio (necessário para o web app no iPhone).
+# 1) liste os endereços pelos quais o servidor é acessado; 2) rode: acervo certificado
+https = false
+# tls_names = ["192.168.0.50", "realme.tail1234.ts.net"]
+
+# Alerta quando o disco passar desta porcentagem.
 storage_alert_pct = 80
 
-# Tamanho sugerido de um lote para transferir a um HD, em GB.
+# Tamanho de um lote para transferir a um HD, em GB.
 archive_batch_gb = 80
 
-# Dias que um item passa na lixeira antes de ser apagado de vez (mínimo 30).
+# Em quantos HDs cada arquivo precisa estar (verificado) antes de sair do servidor.
+# 1 = um HD; 2 = dois HDs (espelho, recomendado para não depender de um disco só).
+archive_copies = 1
+
+# Dias na lixeira antes de apagar de vez (mínimo 30).
 trash_days = 30
+
+# Cartão microSD (Realme): veja docs/realme.md.
+# sd_dir = "/storage/XXXX-XXXX/Android/data/com.termux/files/acervo"
+
+# Cópia diária do catálogo (as 7 mais recentes ficam).
+# catalog_backup_dir = "copias-do-catalogo"

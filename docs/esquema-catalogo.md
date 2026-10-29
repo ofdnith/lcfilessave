@@ -1,7 +1,7 @@
 # Esquema do catálogo (`catalogo.db`)
 
 O catálogo é um SQLite com busca FTS5. O SQL fica em
-[`server/acervo/migrations/0001_initial.sql`](../server/acervo/migrations/0001_initial.sql).
+[`server/acervo/migrations/`](../server/acervo/migrations/) (`0001_initial.sql`, `0002_uploads_auth_storage.sql`).
 Nomes de tabelas e colunas estão em inglês (regra do projeto); abaixo, a tradução.
 
 ## Princípios
@@ -56,6 +56,13 @@ Qualquer outra transição é recusada pelo banco.
 | `settings` | Pares chave/valor (ex.: data do último backup diário) | |
 | `search_fts` | Índice de busca FTS5 | nome, lugar, câmera, texto; ignora acentos ("sao" acha "São"); prefixo |
 | `schema_migrations` | Migrações aplicadas, com checksum | |
+| `uploads` *(v2)* | Uploads retomáveis em andamento | o tamanho do `.part` no disco é a verdade sobre o progresso |
+| `session_files` *(v2)* | Cada arquivo do cliente confirmado por hash numa sessão | conta uma vez, mesmo com reenvios |
+| `auth_tokens` *(v2)* | Sessões de login e tokens (Atalhos, app do Mac) | só o SHA-256 do token é guardado |
+
+Na versão 2 também entraram `files.root` (`main` = memória interna, `sd` = microSD) e
+`suggestions.group_key` (uma sugestão aberta por grupo: todas as capturas de tela juntas,
+uma por rajada, uma por conjunto de quase-duplicados).
 
 ## Refinamentos em relação ao plano original
 

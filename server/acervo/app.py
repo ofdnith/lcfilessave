@@ -6,12 +6,15 @@ import logging
 from contextlib import asynccontextmanager
 from importlib import resources
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from . import __version__, db
-from .api import health
-from .config import Config, load_config
+from . import __version__, db, media
+from .api import archive, auth as auth_api, health, items, uploads
+from .config import CERTS_DIR, GEO_DIR, Config, load_config
+from .ingest import Ingestor, reconcile
+from .jobs import Worker
+from .places import Gazetteer
 from .storage import ensure_layout
 
 log = logging.getLogger(__name__)
@@ -31,29 +34,67 @@ def prepare(cfg: Config) -> tuple[int, int]:
 
 
 def create_app(cfg: Config) -> FastAPI:
+    exiftool = media.ExifTool()
+    gazetteer = Gazetteer(cfg.subdir(GEO_DIR))
+    ingestor = Ingestor(cfg, exiftool)
+    worker = Worker(cfg, exiftool, gazetteer)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         prepare(cfg)
-        log.info("Acervo %s pronto · dados em %s", __version__, cfg.data_dir)
+        report = reconcile(cfg, ingestor)
+        app.state.reconcile_report = report
+        if cfg.workers:
+            worker.start()
+        log.info("Acervo %s pronto · dados em %s · exiftool: %s · HEIC: %s", __version__, cfg.data_dir,
+                 "sim" if exiftool.available else "não", "sim" if media.HEIF_OK else "não")
         yield
+        if cfg.workers:
+            worker.stop()
+        exiftool.close()
 
-    app = FastAPI(
-        title="Acervo",
-        version=__version__,
-        lifespan=lifespan,
-        docs_url="/api/docs",
-        redoc_url=None,
-        openapi_url="/api/openapi.json",
-    )
+    app = FastAPI(title="Acervo", version=__version__, lifespan=lifespan,
+                  docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     app.state.config = cfg
-    app.include_router(health.router)
+    app.state.exiftool = exiftool
+    app.state.ingestor = ingestor
+    app.state.worker = worker if cfg.workers else None
+    app.state.gazetteer = gazetteer
+    app.state.reconcile_report = {}
 
-    # Phase 0 placeholder page; phase 1 replaces it with the Svelte build.
-    index_html = resources.files("acervo.static").joinpath("index.html").read_text("utf-8")
+    for module in (health, auth_api, items, uploads, archive):
+        app.include_router(module.router)
 
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    def index() -> str:
-        return index_html
+    @app.get("/ca.crt", include_in_schema=False)
+    def ca_cert() -> FileResponse:
+        path = cfg.subdir(CERTS_DIR) / "ca.crt"
+        if not path.exists():
+            raise HTTPException(404, "HTTPS próprio não configurado (acervo certificado)")
+        return FileResponse(path, media_type="application/x-x509-ca-cert", filename="acervo-ca.crt")
+
+    placeholder = resources.files("acervo.static").joinpath("index.html").read_text("utf-8")
+    web_dir = cfg.web_dir
+
+    @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+    def api_not_found(rest: str) -> Response:
+        raise HTTPException(404, "Rota da API não existe")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def web(path: str, request: Request) -> Response:
+        """The Svelte build (web/dist), with index.html for client-side routes."""
+        index = web_dir / "index.html"
+        if not index.exists():
+            return HTMLResponse(placeholder)
+        if path:
+            candidate = (web_dir / path).resolve()
+            if candidate.is_file() and web_dir.resolve() in candidate.parents:
+                headers = {}
+                if path.startswith("assets/"):
+                    headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                elif path in ("sw.js", "manifest.webmanifest"):
+                    headers["Cache-Control"] = "no-cache"
+                return FileResponse(candidate, headers=headers)
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     return app
 
@@ -61,3 +102,6 @@ def create_app(cfg: Config) -> FastAPI:
 def app_factory() -> FastAPI:
     """Entry point for uvicorn (--factory). Reads config from $ACERVO_CONFIG."""
     return create_app(load_config())
+
+
+__all__ = ["create_app", "app_factory", "prepare"]

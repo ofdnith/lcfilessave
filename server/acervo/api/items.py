@@ -1,0 +1,329 @@
+"""Browsing, search, media files, triage actions, suggestions, stats."""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
+
+from .. import __version__, auth, db, library, media, power
+from ..catalog import ITEM_COLUMNS, ITEM_FROM, get_setting, iso_in, item_json, now_iso, thumb_path
+from ..jobs import preview_for
+from ..storage import disk_usage
+
+router = APIRouter(prefix="/api", dependencies=[Depends(auth.require_auth)])
+
+VIEWS = {"library": ("library", "archived"), "inbox": ("inbox",), "trash": ("trash",)}
+KINDS = ("photo", "video", "document", "audio", "other")
+_WORD = re.compile(r"\w+", re.UNICODE)
+
+
+def _conn(request: Request) -> sqlite3.Connection:
+    return db.connect(request.app.state.config.db_path)
+
+
+def fts_query(q: str) -> str | None:
+    words = _WORD.findall(q)[:12]
+    return " ".join(f'"{w}"*' for w in words) if words else None
+
+
+def _filters(view: str, kind: str, q: str | None, year: int | None, month: int | None,
+             important: int | None, archived: int | None) -> tuple[list[str], list]:
+    if view not in VIEWS:
+        raise HTTPException(400, "view inválida")
+    states = VIEWS[view]
+    where = [f"i.state IN ({','.join('?' * len(states))})"]
+    args: list = list(states)
+    if kind != "all":
+        if kind not in KINDS:
+            raise HTTPException(400, "kind inválido")
+        where.append("i.kind = ?")
+        args.append(kind)
+    if q:
+        match = fts_query(q)
+        if match:
+            where.append("i.id IN (SELECT rowid FROM search_fts WHERE search_fts MATCH ?)")
+            args.append(match)
+    if year:
+        prefix = f"{year:04d}-{month:02d}" if month else f"{year:04d}"
+        where.append("i.captured_at LIKE ?")
+        args.append(prefix + "%")
+    if important:
+        where.append("i.important = 1")
+    if archived is not None:
+        where.append("i.state = 'archived'" if archived else "i.state <> 'archived'")
+    return where, args
+
+
+@router.get("/items")
+def list_items(request: Request, view: str = "library", kind: str = "all", q: str | None = None,
+               year: int | None = None, month: int | None = Query(None, ge=1, le=12),
+               start: str | None = None, important: int | None = None, archived: int | None = None,
+               cursor: str | None = None, limit: int = Query(200, ge=1, le=500)) -> dict:
+    cfg = request.app.state.config
+    where, args = _filters(view, kind, q, year, month, important, archived)
+    order_col = "i.trashed_at" if view == "trash" else "i.captured_at"
+    total_where, total_args = list(where), list(args)
+    if start:
+        m = re.fullmatch(r"(\d{4})-(\d{2})", start)
+        if not m:
+            raise HTTPException(400, "start deve ser AAAA-MM")
+        y, mo = int(m.group(1)), int(m.group(2))
+        nxt = f"{y + (mo == 12):04d}-{(mo % 12) + 1:02d}"
+        where.append("i.captured_at < ?")
+        args.append(nxt)
+    if cursor:
+        value, _, cid = cursor.rpartition("|")
+        if not cid.isdigit():
+            raise HTTPException(400, "cursor inválido")
+        where.append(f"({order_col} < ? OR ({order_col} = ? AND i.id < ?))")
+        args += [value, value, int(cid)]
+    conn = _conn(request)
+    try:
+        rows = conn.execute(
+            f"SELECT {ITEM_COLUMNS}, {order_col} AS sort_key FROM {ITEM_FROM} WHERE {' AND '.join(where)} "
+            f"ORDER BY {order_col} DESC, i.id DESC LIMIT ?", (*args, limit + 1)).fetchall()
+        total = conn.execute(f"SELECT count(*) FROM items i WHERE {' AND '.join(total_where)}", total_args).fetchone()[0]
+    finally:
+        conn.close()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [item_json(r, cfg) for r in rows],
+        "next_cursor": f"{rows[-1]['sort_key']}|{rows[-1]['id']}" if more and rows else None,
+        "total": total,
+    }
+
+
+@router.get("/timeline")
+def timeline(request: Request, view: str = "library", kind: str = "all", q: str | None = None,
+             important: int | None = None, archived: int | None = None) -> dict:
+    where, args = _filters(view, kind, q, None, None, important, archived)
+    conn = _conn(request)
+    try:
+        rows = conn.execute(
+            f"SELECT substr(i.captured_at, 1, 7) AS ym, count(*) AS n FROM items i WHERE {' AND '.join(where)} "
+            f"GROUP BY ym ORDER BY ym DESC", args).fetchall()
+    finally:
+        conn.close()
+    return {"months": [{"year": int(r["ym"][:4]), "month": int(r["ym"][5:7]), "count": r["n"]} for r in rows]}
+
+
+def _get_item(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row:
+    row = conn.execute(f"SELECT {ITEM_COLUMNS} FROM {ITEM_FROM} WHERE i.id = ? AND i.state <> 'purged'",
+                       (item_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Item não encontrado")
+    return row
+
+
+@router.get("/items/{item_id}")
+def get_item(item_id: int, request: Request) -> dict:
+    cfg = request.app.state.config
+    conn = _conn(request)
+    try:
+        row = _get_item(conn, item_id)
+        data = item_json(row, cfg)
+        files = []
+        for f in conn.execute("SELECT id, role, size_bytes, mime, rel_path FROM files WHERE item_id = ? "
+                              "ORDER BY role = 'live-video'", (item_id,)):
+            vols = [r[0] for r in conn.execute(
+                "SELECT v.name FROM volume_copies vc JOIN volumes v ON v.id = vc.volume_id "
+                "WHERE vc.file_id = ? AND vc.verified_at IS NOT NULL ORDER BY v.name", (f["id"],))]
+            files.append({"id": f["id"], "role": f["role"], "size_bytes": f["size_bytes"], "mime": f["mime"],
+                          "on_server": f["rel_path"] is not None, "volumes": vols})
+        data["files"] = files
+        data["suggestions"] = [dict(r) for r in conn.execute(
+            "SELECT s.id, s.kind FROM suggestions s JOIN suggestion_items si ON si.suggestion_id = s.id "
+            "WHERE si.item_id = ? AND s.status = 'open'", (item_id,))]
+    finally:
+        conn.close()
+    return data
+
+
+IMMUTABLE = {"Cache-Control": "private, max-age=31536000, immutable"}
+
+
+@router.get("/items/{item_id}/thumb")
+def thumb(item_id: int, request: Request) -> FileResponse:
+    cfg = request.app.state.config
+    conn = _conn(request)
+    try:
+        row = conn.execute("SELECT sha256 FROM items WHERE id = ? AND state <> 'purged'", (item_id,)).fetchone()
+    finally:
+        conn.close()
+    path = thumb_path(cfg, row["sha256"]) if row else None
+    if path is None or not path.exists():
+        raise HTTPException(404, "Miniatura ainda não existe")
+    return FileResponse(path, media_type="image/webp", headers=IMMUTABLE)
+
+
+def _file_for(conn: sqlite3.Connection, request: Request, item_id: int, role: str):
+    cfg = request.app.state.config
+    row = conn.execute(
+        "SELECT i.*, f.rel_path, f.root, f.ext, f.mime AS file_mime, v.name AS volume_name FROM items i "
+        "JOIN files f ON f.item_id = i.id AND f.role = ? LEFT JOIN volumes v ON v.id = i.volume_id "
+        "WHERE i.id = ? AND i.state <> 'purged'", (role, item_id)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Arquivo não encontrado")
+    if row["rel_path"] is None:
+        raise HTTPException(410, {"error": f"Original no {row['volume_name']}", "volume": row["volume_name"]})
+    path = cfg.root_dir(row["root"]) / row["rel_path"]
+    if not path.exists():
+        raise HTTPException(404, "Arquivo sumiu do disco; rode a verificação do servidor")
+    return row, path
+
+
+@router.get("/items/{item_id}/original")
+def original(item_id: int, request: Request, role: str = "original", download: int = 0) -> FileResponse:
+    if role not in ("original", "live-video"):
+        raise HTTPException(400, "role inválido")
+    conn = _conn(request)
+    try:
+        row, path = _file_for(conn, request, item_id, role)
+    finally:
+        conn.close()
+    name = row["original_name"] if role == "original" else path.name
+    return FileResponse(path, media_type=row["file_mime"] or "application/octet-stream", filename=name,
+                        content_disposition_type="attachment" if download else "inline")
+
+
+@router.get("/items/{item_id}/preview")
+async def preview(item_id: int, request: Request) -> FileResponse:
+    state = request.app.state
+    conn = _conn(request)
+    try:
+        row, path = _file_for(conn, request, item_id, "original")
+    finally:
+        conn.close()
+    mime = row["file_mime"] or ""
+    if row["kind"] == "photo" and mime not in media.BROWSER_IMAGE_MIME:
+        try:
+            path = await run_in_threadpool(preview_for, state.config, state.exiftool, row, path)
+        except media.CannotRender:
+            raise HTTPException(415, "Não foi possível gerar a prévia") from None
+        return FileResponse(path, media_type="image/jpeg", headers=IMMUTABLE)
+    return FileResponse(path, media_type=mime or "application/octet-stream")
+
+
+class ActionBody(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+    action: str
+
+
+@router.post("/items/actions")
+async def actions(body: ActionBody, request: Request) -> dict:
+    cfg = request.app.state.config
+    try:
+        return await run_in_threadpool(library.apply_action, cfg, body.ids, body.action, "web")
+    except library.ActionError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/trash/purge-expired")
+async def purge(request: Request) -> dict:
+    return {"purged": await run_in_threadpool(library.purge_expired, request.app.state.config, "web")}
+
+
+@router.get("/suggestions")
+def suggestions(request: Request, status: str = "open") -> dict:
+    cfg = request.app.state.config
+    conn = _conn(request)
+    try:
+        library.resolve_suggestions(conn)
+        out = []
+        for s in conn.execute("SELECT id, kind, created_at FROM suggestions WHERE status = ? "
+                              "ORDER BY created_at DESC LIMIT 200", (status,)):
+            rows = conn.execute(
+                f"SELECT {ITEM_COLUMNS} FROM {ITEM_FROM} JOIN suggestion_items si ON si.item_id = i.id "
+                f"WHERE si.suggestion_id = ? AND i.state IN ('inbox', 'library', 'archived') "
+                f"ORDER BY i.captured_at DESC", (s["id"],)).fetchall()
+            if rows:
+                out.append({"id": s["id"], "kind": s["kind"], "created_at": s["created_at"],
+                            "items": [item_json(r, cfg) for r in rows]})
+    finally:
+        conn.close()
+    return {"suggestions": out}
+
+
+@router.post("/suggestions/{suggestion_id}/dismiss")
+def dismiss(suggestion_id: int, request: Request) -> dict:
+    conn = _conn(request)
+    try:
+        cur = conn.execute("UPDATE suggestions SET status = 'dismissed', resolved_at = ? WHERE id = ? "
+                           "AND status = 'open'", (now_iso(), suggestion_id))
+    finally:
+        conn.close()
+    return {"ok": cur.rowcount == 1}
+
+
+def _tab_stats(conn: sqlite3.Connection, states: tuple[str, ...]) -> dict:
+    tabs = {k: {"count": 0, "bytes": 0} for k in ("all", *KINDS)}
+    for r in conn.execute(f"SELECT kind, count(*), coalesce(sum(size_bytes), 0) FROM items "
+                          f"WHERE state IN ({','.join('?' * len(states))}) GROUP BY kind", states):
+        tabs[r[0]] = {"count": r[1], "bytes": r[2]}
+        tabs["all"]["count"] += r[1]
+        tabs["all"]["bytes"] += r[2]
+    return tabs
+
+
+def daily_status(conn: sqlite3.Connection) -> dict:
+    last = get_setting(conn, "last_daily_backup_at")
+    return {"last_at": last, "overdue": bool(last and last < iso_in(-2))}
+
+
+@router.get("/stats")
+def stats(request: Request) -> dict:
+    cfg = request.app.state.config
+    conn = _conn(request)
+    try:
+        count = lambda sql, *a: conn.execute(sql, a).fetchone()[0]  # noqa: E731
+        server_bytes = count("SELECT coalesce(sum(size_bytes), 0) FROM files WHERE rel_path IS NOT NULL")
+        recent = count("SELECT coalesce(sum(size_bytes), 0) FROM items WHERE uploaded_at >= ? "
+                       "AND state <> 'purged'", iso_in(-28))
+        data = {
+            "inbox_count": count("SELECT count(*) FROM items WHERE state = 'inbox'"),
+            "trash_count": count("SELECT count(*) FROM items WHERE state = 'trash'"),
+            "archived_count": count("SELECT count(*) FROM items WHERE state = 'archived'"),
+            "suggestions_open": count("SELECT count(*) FROM suggestions WHERE status = 'open'"),
+            "tabs": _tab_stats(conn, ("library", "archived")),
+            "inbox_tabs": _tab_stats(conn, ("inbox",)),
+            "daily_backup": daily_status(conn),
+        }
+    finally:
+        conn.close()
+    usage = disk_usage(cfg.data_dir)
+    budget = cfg.archive_batch_gb * 1_000_000_000
+    weekly = recent / 4
+    data["storage"] = {
+        "server_bytes": server_bytes,
+        "budget_bytes": budget,
+        "disk_total_bytes": usage.total_bytes,
+        "disk_free_bytes": usage.free_bytes,
+        "used_pct": usage.used_pct,
+        "alert": usage.used_pct >= cfg.storage_alert_pct or server_bytes >= budget,
+        "weeks_to_next_drive": round(max(0, budget - server_bytes) / weekly, 1) if weekly > 0 else None,
+    }
+    return data
+
+
+@router.get("/daily")
+def daily(request: Request) -> dict:
+    conn = _conn(request)
+    try:
+        return daily_status(conn)
+    finally:
+        conn.close()
+
+
+@router.get("/settings")
+def settings(request: Request) -> dict:
+    cfg = request.app.state.config
+    return {"archive_batch_gb": cfg.archive_batch_gb, "trash_days": cfg.trash_days,
+            "archive_copies": cfg.archive_copies, "server_name": cfg.server_name, "version": __version__,
+            "battery": power.battery()}
+
