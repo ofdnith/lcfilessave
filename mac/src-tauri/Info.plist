@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged by Tauri into the app's Info.plist. -->
+  <!-- The server lives on the home LAN (http://192.168.x.x:8765) or Tailscale. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>O Acervo precisa acessar a rede local para falar com o seu servidor de backup.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>O Acervo precisa acessar os HDs externos para arquivar e verificar seus arquivos.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>O Acervo lê as pastas que você escolher para enviá-las ao servidor.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>O Acervo lê as pastas que você escolher para enviá-las ao servidor.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>O Acervo lê as pastas que você escolher para enviá-las ao servidor.</string>
+</dict>
+</plist>

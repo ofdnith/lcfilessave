@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use tokio_util::io::ReaderStream;
 
-use crate::transfer::{http_error, net_error, server_join, with_auth};
+use crate::transfer::{http_error, io_pt, net_error, server_join, with_auth};
 
 pub const MAX_ATTEMPTS: u32 = 3;
 
@@ -60,11 +60,11 @@ pub async fn upload_file(
         // Re-open each time: a body stream cannot be replayed.
         let file = tokio::fs::File::open(p.path)
             .await
-            .map_err(|e| format!("Não consegui abrir {}: {e}", p.path.display()))?;
+            .map_err(|e| format!("Não consegui abrir {}: {}", p.path.display(), io_pt(&e)))?;
         let len = file
             .metadata()
             .await
-            .map_err(|e| format!("Não consegui ler {}: {e}", p.path.display()))?
+            .map_err(|e| format!("Não consegui ler {}: {}", p.path.display(), io_pt(&e)))?
             .len();
         let body = reqwest::Body::wrap_stream(ReaderStream::with_capacity(file, 1024 * 1024));
         let req = with_auth(client.post(&url), p.token)
@@ -141,7 +141,10 @@ mod tests {
         let req = srv.last_request.lock().unwrap().clone();
         let pos = req.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
         let head = String::from_utf8_lossy(&req[..pos]).to_ascii_lowercase();
-        assert!(head.starts_with("post /api/upload?source=mac&session_id=1 "), "{head}");
+        assert!(
+            head.starts_with("post /api/upload?source=mac&session_id=1 "),
+            "{head}"
+        );
         assert!(head.contains("authorization: bearer t0k"));
         assert!(head.contains("x-filename: f%c3%a9rias%201.jpg"), "{head}");
         assert!(head.contains(&format!("content-length: {}", data.len())));
@@ -155,13 +158,23 @@ mod tests {
         let path = dir.path().join("a.jpg");
         std::fs::write(&path, b"x").unwrap();
         // Bind and drop to get a port nobody listens on.
-        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
         let url = format!("http://127.0.0.1:{port}");
         let err = upload_file(
             &crate::transfer::http_client(),
             UploadParams {
-                server_url: &url, token: None, path: &path, source: "mac",
-                session_id: None, sha256: None, created_ms: None, client_key: None,
+                server_url: &url,
+                token: None,
+                path: &path,
+                source: "mac",
+                session_id: None,
+                sha256: None,
+                created_ms: None,
+                client_key: None,
             },
         )
         .await

@@ -9,6 +9,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::transfer::io_pt;
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     /// Normalized origin of the Acervo server, e.g. `http://192.168.0.50:8765`.
@@ -32,8 +34,7 @@ pub fn normalize_server_url(input: &str) -> Result<String, String> {
     } else {
         format!("http://{raw}")
     };
-    let url = reqwest::Url::parse(&with_scheme)
-        .map_err(|_| format!("Endereço inválido: {raw}"))?;
+    let url = reqwest::Url::parse(&with_scheme).map_err(|_| format!("Endereço inválido: {raw}"))?;
     match url.scheme() {
         "http" | "https" => {}
         other => return Err(format!("Use http:// ou https:// (recebido {other}://).")),
@@ -46,7 +47,9 @@ pub fn normalize_server_url(input: &str) -> Result<String, String> {
         return Err("Não coloque usuário/senha no endereço.".into());
     }
     if url.path() != "/" && !url.path().is_empty() {
-        return Err("Use só o endereço do servidor, sem caminho (ex.: http://192.168.0.50:8765).".into());
+        return Err(
+            "Use só o endereço do servidor, sem caminho (ex.: http://192.168.0.50:8765).".into(),
+        );
     }
     if url.query().is_some() || url.fragment().is_some() {
         return Err("O endereço não pode ter ? nem #.".into());
@@ -77,16 +80,18 @@ pub fn save(path: &Path, cfg: &AppConfig) -> Result<(), String> {
     let dir = path
         .parent()
         .ok_or_else(|| "Pasta de configuração inválida.".to_string())?;
-    fs::create_dir_all(dir).map_err(|e| format!("Não consegui criar {}: {e}", dir.display()))?;
+    fs::create_dir_all(dir)
+        .map_err(|e| format!("Não consegui criar {}: {}", dir.display(), io_pt(&e)))?;
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_vec_pretty(cfg).map_err(|e| e.to_string())?;
     let mut f = fs::File::create(&tmp)
-        .map_err(|e| format!("Não consegui salvar a configuração: {e}"))?;
+        .map_err(|e| format!("Não consegui salvar a configuração: {}", io_pt(&e)))?;
     f.write_all(&json)
         .and_then(|_| f.sync_all())
-        .map_err(|e| format!("Não consegui salvar a configuração: {e}"))?;
+        .map_err(|e| format!("Não consegui salvar a configuração: {}", io_pt(&e)))?;
     drop(f);
-    fs::rename(&tmp, path).map_err(|e| format!("Não consegui salvar a configuração: {e}"))?;
+    fs::rename(&tmp, path)
+        .map_err(|e| format!("Não consegui salvar a configuração: {}", io_pt(&e)))?;
     Ok(())
 }
 
@@ -96,14 +101,23 @@ mod tests {
 
     #[test]
     fn normalizes_common_inputs() {
-        assert_eq!(normalize_server_url("192.168.0.50:8765").unwrap(), "http://192.168.0.50:8765");
-        assert_eq!(normalize_server_url(" http://192.168.0.50:8765/ ").unwrap(), "http://192.168.0.50:8765");
+        assert_eq!(
+            normalize_server_url("192.168.0.50:8765").unwrap(),
+            "http://192.168.0.50:8765"
+        );
+        assert_eq!(
+            normalize_server_url(" http://192.168.0.50:8765/ ").unwrap(),
+            "http://192.168.0.50:8765"
+        );
         assert_eq!(
             normalize_server_url("https://Acervo.tailnet.ts.net").unwrap(),
             "https://acervo.tailnet.ts.net"
         );
         // Default port is dropped by the URL parser.
-        assert_eq!(normalize_server_url("https://x.ts.net:443/").unwrap(), "https://x.ts.net");
+        assert_eq!(
+            normalize_server_url("https://x.ts.net:443/").unwrap(),
+            "https://x.ts.net"
+        );
     }
 
     #[test]
@@ -116,7 +130,10 @@ mod tests {
             "http://x/?a=1",
             "file:///etc",
         ] {
-            assert!(normalize_server_url(bad).is_err(), "{bad} should be rejected");
+            assert!(
+                normalize_server_url(bad).is_err(),
+                "{bad} should be rejected"
+            );
         }
     }
 
@@ -125,7 +142,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub/config.json");
         assert_eq!(load(&path), AppConfig::default());
-        let cfg = AppConfig { server_url: Some("http://a:1".into()) };
+        let cfg = AppConfig {
+            server_url: Some("http://a:1".into()),
+        };
         save(&path, &cfg).unwrap();
         assert_eq!(load(&path), cfg);
     }

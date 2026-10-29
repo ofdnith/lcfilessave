@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::transfer::io_pt;
+
 pub const ACERVO_DIR: &str = ".acervo";
 pub const VOLUME_FILE: &str = "volume.json";
 pub const THUMBS_DIR: &str = "miniaturas";
@@ -62,10 +64,16 @@ pub fn read_volume_json(mount: &Path) -> Result<Option<VolumeJson>, String> {
     let bytes = match fs::read(&path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("Não consegui ler {}: {e}", path.display())),
+        Err(e) => {
+            return Err(format!(
+                "Não consegui ler {}: {}",
+                path.display(),
+                io_pt(&e)
+            ))
+        }
     };
     let v: VolumeJson = serde_json::from_slice(&bytes)
-        .map_err(|e| format!("volume.json inválido: {e}"))?;
+        .map_err(|_| "volume.json inválido (arquivo corrompido)".to_string())?;
     if v.id.trim().is_empty() {
         return Err("volume.json sem id".into());
     }
@@ -86,7 +94,11 @@ pub fn build_disk(
         .unwrap_or_else(|| mount.display().to_string());
     let (volume, volume_error) = match read_volume_json(mount) {
         Ok(Some(v)) => (
-            Some(VolumeRef { id: v.id, name: v.name, created_at: v.created_at }),
+            Some(VolumeRef {
+                id: v.id,
+                name: v.name,
+                created_at: v.created_at,
+            }),
             None,
         ),
         Ok(None) => (None, None),
@@ -123,7 +135,11 @@ pub fn init_volume_at(
         return Err(format!(
             "Este disco está formatado como {}. O Acervo só usa HDs em exFAT \
              (formate pelo Utilitário de Disco escolhendo \"ExFAT\").",
-            if filesystem.is_empty() { "desconhecido" } else { filesystem }
+            if filesystem.is_empty() {
+                "desconhecido"
+            } else {
+                filesystem
+            }
         ));
     }
     if !valid_volume_id(id) {
@@ -142,7 +158,7 @@ pub fn init_volume_at(
         }
         Ok(Some(existing)) => {
             fs::create_dir_all(mount.join(ACERVO_DIR).join(THUMBS_DIR))
-                .map_err(|e| format!("Não consegui criar a pasta de miniaturas: {e}"))?;
+                .map_err(|e| format!("Não consegui criar a pasta de miniaturas: {}", io_pt(&e)))?;
             return Ok(existing);
         }
         Ok(None) => {}
@@ -151,7 +167,7 @@ pub fn init_volume_at(
 
     let dir = mount.join(ACERVO_DIR);
     fs::create_dir_all(dir.join(THUMBS_DIR))
-        .map_err(|e| format!("Não consegui criar {}: {e}", dir.display()))?;
+        .map_err(|e| format!("Não consegui criar {}: {}", dir.display(), io_pt(&e)))?;
     let vol = VolumeJson {
         id: id.to_string(),
         name: name.to_string(),
@@ -168,9 +184,11 @@ pub fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let dir = path.parent().ok_or("caminho sem pasta")?;
     let tmp = path.with_file_name(format!(
         "{}.tmp",
-        path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        path.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
     ));
-    let err = |e: std::io::Error| format!("Não consegui gravar {}: {e}", path.display());
+    let err = |e: std::io::Error| format!("Não consegui gravar {}: {}", path.display(), io_pt(&e));
     let mut f = fs::File::create(&tmp).map_err(err)?;
     f.write_all(bytes).and_then(|_| f.sync_all()).map_err(err)?;
     drop(f);
@@ -186,7 +204,7 @@ pub fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 /// Lists external disks, sorted by label.
 pub fn list_disks() -> Vec<Disk> {
     let mut disks = platform::list();
-    disks.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
+    disks.sort_by_key(|d| d.label.to_lowercase());
     disks
 }
 
@@ -194,7 +212,9 @@ pub fn list_disks() -> Vec<Disk> {
 /// Commands that write use this so a page can never make us write elsewhere.
 pub fn find_disk(mount_path: &str) -> Option<Disk> {
     let wanted = Path::new(mount_path.trim_end_matches('/'));
-    list_disks().into_iter().find(|d| Path::new(&d.mount_path) == wanted)
+    list_disks()
+        .into_iter()
+        .find(|d| Path::new(&d.mount_path) == wanted)
 }
 
 #[cfg(target_os = "macos")]
@@ -217,7 +237,9 @@ mod platform {
                 continue;
             }
             let path = entry.path();
-            let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
             if meta.file_type().is_symlink() || !meta.is_dir() {
                 continue;
             }
@@ -268,17 +290,28 @@ mod platform {
     use std::path::{Path, PathBuf};
 
     pub fn list() -> Vec<Disk> {
-        let mut prefixes: Vec<PathBuf> =
-            ["/media/", "/run/media/", "/mnt/"].iter().map(PathBuf::from).collect();
+        let mut prefixes: Vec<PathBuf> = ["/media/", "/run/media/", "/mnt/"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
         if let Ok(extra) = std::env::var("ACERVO_DISK_ROOTS") {
-            prefixes.extend(extra.split(':').filter(|s| !s.is_empty()).map(PathBuf::from));
+            prefixes.extend(
+                extra
+                    .split(':')
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from),
+            );
         }
         let Ok(text) = std::fs::read_to_string("/proc/self/mounts") else {
             return Vec::new();
         };
         parse_mounts(&text)
             .into_iter()
-            .filter(|m| prefixes.iter().any(|p| m.mount.starts_with(p) && m.mount != *p))
+            .filter(|m| {
+                prefixes
+                    .iter()
+                    .any(|p| m.mount.starts_with(p) && m.mount != *p)
+            })
             .filter_map(|m| {
                 let (total, free) = statvfs(&m.mount)?;
                 Some(build_disk(&m.mount, &m.fstype, total, free, m.read_only))
@@ -299,7 +332,10 @@ mod platform {
         let mut out = Vec::with_capacity(b.len());
         let mut i = 0;
         while i < b.len() {
-            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+            if b[i] == b'\\'
+                && i + 3 < b.len()
+                && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+            {
                 let v = (b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0');
                 out.push(v);
                 i += 4;
@@ -391,8 +427,14 @@ mod tests {
     #[test]
     fn init_then_recognized() {
         let dir = tempfile::tempdir().unwrap();
-        let v = init_volume_at(dir.path(), "exfat", "a1b2-c3", "VOLUME-001", "2026-10-29T10:00:00Z")
-            .unwrap();
+        let v = init_volume_at(
+            dir.path(),
+            "exfat",
+            "a1b2-c3",
+            "VOLUME-001",
+            "2026-10-29T10:00:00Z",
+        )
+        .unwrap();
         assert_eq!(v.acervo, 1);
         assert!(dir.path().join(".acervo/miniaturas").is_dir());
         let raw: serde_json::Value =

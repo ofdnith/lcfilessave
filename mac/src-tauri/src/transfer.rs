@@ -15,7 +15,7 @@
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,32 @@ pub const HASH_BUF: usize = 1024 * 1024;
 pub const FREE_SPACE_MARGIN: u64 = 64 * 1024 * 1024;
 /// Minimum interval between progress events.
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Short Portuguese description of an I/O error (the UI shows these as-is).
+pub fn io_pt(e: &io::Error) -> String {
+    use io::ErrorKind as K;
+    let msg = match e.kind() {
+        K::NotFound => "não encontrado",
+        K::PermissionDenied => {
+            "sem permissão (libere o Acervo em Ajustes do Sistema › Privacidade e Segurança)"
+        }
+        K::AlreadyExists => "já existe",
+        K::StorageFull => "disco cheio",
+        K::ReadOnlyFilesystem => "disco só para leitura",
+        K::NotADirectory => "não é uma pasta",
+        K::IsADirectory => "é uma pasta",
+        K::UnexpectedEof => "arquivo terminou antes do esperado",
+        K::Interrupted | K::TimedOut => "operação interrompida",
+        K::InvalidInput | K::InvalidData | K::InvalidFilename => "nome ou dado inválido",
+        K::ResourceBusy => "em uso por outro programa",
+        _ => match e.raw_os_error() {
+            Some(libc::EIO) => "erro de leitura/gravação no disco (cabo ou disco com defeito?)",
+            Some(libc::ENXIO) | Some(libc::ENODEV) => "o disco foi desconectado",
+            _ => return format!("erro do sistema ({e})"),
+        },
+    };
+    msg.to_string()
+}
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -46,16 +72,16 @@ pub fn safe_join(mount: &Path, rel_path: &str) -> Result<PathBuf, String> {
         return Err(bad());
     }
     let p = Path::new(rel_path);
-    for (i, part) in rel_path.split('/').enumerate() {
-        if part.is_empty() && i != 0 {
-            return Err(bad());
-        }
+    // Check raw segments: Path::components() would silently drop "." and "".
+    if rel_path
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
+        return Err(bad());
     }
-    for comp in p.components() {
-        match comp {
-            Component::Normal(_) => {}
-            _ => return Err(bad()),
-        }
+    // Belt and braces: every component must be a plain name.
+    if !p.components().all(|c| matches!(c, Component::Normal(_))) {
+        return Err(bad());
     }
     if rel_path.ends_with(".part") || rel_path.ends_with(".tmp") {
         return Err(bad());
@@ -77,12 +103,17 @@ pub fn validate_original_rel_path(rel_path: &str) -> Result<(), String> {
 /// resolving symlinks, they are still inside `mount`.
 fn prepare_parent(mount: &Path, target: &Path) -> Result<PathBuf, String> {
     let parent = target.parent().ok_or("Caminho sem pasta")?.to_path_buf();
-    fs::create_dir_all(&parent)
-        .map_err(|e| format!("Não consegui criar a pasta {}: {e}", parent.display()))?;
+    fs::create_dir_all(&parent).map_err(|e| {
+        format!(
+            "Não consegui criar a pasta {}: {}",
+            parent.display(),
+            io_pt(&e)
+        )
+    })?;
     let real_mount = fs::canonicalize(mount)
-        .map_err(|e| format!("Disco inacessível ({}): {e}", mount.display()))?;
+        .map_err(|e| format!("Disco inacessível ({}): {}", mount.display(), io_pt(&e)))?;
     let real_parent = fs::canonicalize(&parent)
-        .map_err(|e| format!("Pasta inacessível ({}): {e}", parent.display()))?;
+        .map_err(|e| format!("Pasta inacessível ({}): {}", parent.display(), io_pt(&e)))?;
     if !real_parent.starts_with(&real_mount) {
         return Err("O caminho sai do disco (link simbólico?). Recusado.".into());
     }
@@ -162,7 +193,10 @@ impl<F: FnMut(u64, u64)> Throttle<F> {
     }
     pub fn tick(&mut self, done: u64, total: u64) {
         let now = Instant::now();
-        if self.last.is_none_or(|t| now.duration_since(t) >= PROGRESS_INTERVAL) {
+        if self
+            .last
+            .is_none_or(|t| now.duration_since(t) >= PROGRESS_INTERVAL)
+        {
             self.last = Some(now);
             (self.f)(done, total);
         }
@@ -191,7 +225,7 @@ where
     let result: Result<u64, String> = async {
         let mut file = tokio::fs::File::create(&part)
             .await
-            .map_err(|e| format!("Não consegui criar {}: {e}", part.display()))?;
+            .map_err(|e| format!("Não consegui criar {}: {}", part.display(), io_pt(&e)))?;
         let mut done = 0u64;
         let mut throttle = Throttle::new(progress);
         throttle.tick(0, total);
@@ -199,16 +233,18 @@ where
             let chunk = chunk.map_err(|e| format!("Falha ao baixar do servidor: {e}"))?;
             file.write_all(&chunk)
                 .await
-                .map_err(|e| format!("Falha ao gravar no disco: {e}"))?;
+                .map_err(|e| format!("Falha ao gravar no disco: {}", io_pt(&e)))?;
             done += chunk.len() as u64;
             throttle.tick(done, total);
         }
-        file.flush().await.map_err(|e| format!("Falha ao gravar no disco: {e}"))?;
+        file.flush()
+            .await
+            .map_err(|e| format!("Falha ao gravar no disco: {}", io_pt(&e)))?;
         // On macOS std's sync_all uses F_FULLFSYNC, which also flushes the
         // drive's own write cache — what we want before trusting an HD copy.
         file.sync_all()
             .await
-            .map_err(|e| format!("Falha ao confirmar a gravação no disco: {e}"))?;
+            .map_err(|e| format!("Falha ao confirmar a gravação no disco: {}", io_pt(&e)))?;
         drop(file);
         throttle.finish(done, total);
         Ok(done)
@@ -218,7 +254,11 @@ where
         Ok(done) => {
             if let Err(e) = fs::rename(&part, target) {
                 let _ = fs::remove_file(&part);
-                return Err(format!("Não consegui renomear {}: {e}", part.display()));
+                return Err(format!(
+                    "Não consegui renomear {}: {}",
+                    part.display(),
+                    io_pt(&e)
+                ));
             }
             fsync_dir(&parent);
             Ok(done)
@@ -263,15 +303,11 @@ pub fn with_auth(req: reqwest::RequestBuilder, token: Option<&str>) -> reqwest::
 /// Human message for a failed HTTP response, using the server's `{error}` if any.
 pub async fn http_error(resp: reqwest::Response) -> String {
     let status = resp.status();
-    let detail = resp
-        .json::<serde_json::Value>()
-        .await
-        .ok()
-        .and_then(|v| {
-            v.get("error")
-                .or_else(|| v.get("detail"))
-                .and_then(|e| e.as_str().map(str::to_string))
-        });
+    let detail = resp.json::<serde_json::Value>().await.ok().and_then(|v| {
+        v.get("error")
+            .or_else(|| v.get("detail"))
+            .and_then(|e| e.as_str().map(str::to_string))
+    });
     let base = match status.as_u16() {
         401 => "O servidor pediu login de novo (token inválido ou expirado).".to_string(),
         403 => "O servidor recusou o acesso.".to_string(),
@@ -295,6 +331,7 @@ pub fn net_error(e: reqwest::Error) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_to(
     client: &reqwest::Client,
     server_url: &str,
@@ -306,7 +343,10 @@ async fn download_to(
     progress: impl FnMut(u64, u64),
 ) -> Result<u64, String> {
     let full = server_join(server_url, url)?;
-    let resp = with_auth(client.get(&full), token).send().await.map_err(net_error)?;
+    let resp = with_auth(client.get(&full), token)
+        .send()
+        .await
+        .map_err(net_error)?;
     if !resp.status().is_success() {
         return Err(http_error(resp).await);
     }
@@ -341,7 +381,11 @@ pub fn human_bytes(b: u64) -> String {
         v /= 1000.0;
         i += 1;
     }
-    if i == 0 { format!("{b} B") } else { format!("{v:.1} {}", U[i]).replace('.', ",") }
+    if i == 0 {
+        format!("{b} B")
+    } else {
+        format!("{v:.1} {}", U[i]).replace('.', ",")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -376,18 +420,23 @@ pub async fn copy_to_volume(
     // Already there? Only trust it after hashing it.
     if let Ok(meta) = fs::symlink_metadata(&target) {
         if !meta.is_file() {
-            return Err(format!("{rel_path} existe no disco mas não é um arquivo comum."));
+            return Err(format!(
+                "{rel_path} existe no disco mas não é um arquivo comum."
+            ));
         }
         let size_ok = size_bytes.is_none_or(|s| s == meta.len());
         let existing = if size_ok {
             sha256_file_async(target.clone())
                 .await
-                .map_err(|e| format!("Não consegui ler {rel_path} no disco: {e}"))?
+                .map_err(|e| format!("Não consegui ler {rel_path} no disco: {}", io_pt(&e)))?
         } else {
             String::new()
         };
         if existing == expected {
-            return Ok(CopyResult { sha256: existing, skipped: true });
+            return Ok(CopyResult {
+                sha256: existing,
+                skipped: true,
+            });
         }
         // A different file already sits where this original should go. It is
         // not ours to overwrite or delete: stop and let the user look.
@@ -396,14 +445,20 @@ pub async fn copy_to_volume(
         ));
     }
 
-    download_to(client, server_url, token, url, mount, &target, size_bytes, progress).await?;
+    download_to(
+        client, server_url, token, url, mount, &target, size_bytes, progress,
+    )
+    .await?;
 
     // Read back from the disk — this hash, not the downloaded bytes, is what counts.
     let reread = match sha256_file_async(target.clone()).await {
         Ok(h) => h,
         Err(e) => {
             let _ = fs::remove_file(&target);
-            return Err(format!("Não consegui reler {rel_path} do disco: {e}. Cópia removida."));
+            return Err(format!(
+                "Não consegui reler {rel_path} do disco: {}. Cópia removida.",
+                io_pt(&e)
+            ));
         }
     };
     if reread != expected {
@@ -413,7 +468,10 @@ pub async fn copy_to_volume(
             "A cópia de {rel_path} no disco não confere (SHA-256 diferente). Cópia removida."
         ));
     }
-    Ok(CopyResult { sha256: reread, skipped: false })
+    Ok(CopyResult {
+        sha256: reread,
+        skipped: false,
+    })
 }
 
 /// Downloads a bundle file (catalog, HTML, thumbnails) with an atomic write.
@@ -426,7 +484,17 @@ pub async fn write_bundle_file(
     url: &str,
 ) -> Result<(), String> {
     let target = safe_join(mount, path)?;
-    download_to(client, server_url, token, url, mount, &target, None, |_, _| {}).await?;
+    download_to(
+        client,
+        server_url,
+        token,
+        url,
+        mount,
+        &target,
+        None,
+        |_, _| {},
+    )
+    .await?;
     Ok(())
 }
 
@@ -449,7 +517,11 @@ pub struct VerifyResult {
 }
 
 pub fn verify_one(mount: &Path, f: &VerifyFile) -> VerifyResult {
-    let fail = |msg: String| VerifyResult { file_id: f.file_id, ok: false, error: Some(msg) };
+    let fail = |msg: String| VerifyResult {
+        file_id: f.file_id,
+        ok: false,
+        error: Some(msg),
+    };
     let expected = match normalize_hash(&f.sha256) {
         Ok(h) => h,
         Err(e) => return fail(e),
@@ -459,10 +531,16 @@ pub fn verify_one(mount: &Path, f: &VerifyFile) -> VerifyResult {
         Err(e) => return fail(e),
     };
     match sha256_file(&path) {
-        Ok(h) if h == expected => VerifyResult { file_id: f.file_id, ok: true, error: None },
+        Ok(h) if h == expected => VerifyResult {
+            file_id: f.file_id,
+            ok: true,
+            error: None,
+        },
         Ok(_) => fail("Conteúdo diferente do original (SHA-256 não confere).".into()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => fail("Arquivo não encontrado no disco.".into()),
-        Err(e) => fail(format!("Não consegui ler o arquivo: {e}")),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            fail("Arquivo não encontrado no disco.".into())
+        }
+        Err(e) => fail(format!("Não consegui ler o arquivo: {}", io_pt(&e))),
     }
 }
 
@@ -479,8 +557,8 @@ pub struct ScannedFile {
 }
 
 const PHOTO_EXT: &[&str] = &[
-    "heic", "heif", "jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "dng", "raw", "cr2",
-    "cr3", "nef", "arw", "orf", "rw2", "raf", "bmp", "avif",
+    "heic", "heif", "jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "dng", "raw", "cr2", "cr3",
+    "nef", "arw", "orf", "rw2", "raf", "bmp", "avif",
 ];
 const VIDEO_EXT: &[&str] = &[
     "mov", "mp4", "m4v", "avi", "mkv", "3gp", "mts", "m2ts", "webm", "wmv", "mpg", "mpeg",
@@ -505,14 +583,17 @@ pub fn kind_rank(name: &str) -> u8 {
 /// Recursive listing; skips hidden files/folders (".*", including .DS_Store)
 /// and does not follow symlinks.
 pub fn scan_folder(root: &Path) -> Result<Vec<ScannedFile>, String> {
-    let meta = fs::metadata(root).map_err(|e| format!("Pasta inacessível ({}): {e}", root.display()))?;
+    let meta = fs::metadata(root)
+        .map_err(|e| format!("Pasta inacessível ({}): {}", root.display(), io_pt(&e)))?;
     if !meta.is_dir() {
         return Err(format!("{} não é uma pasta.", root.display()));
     }
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name == "Icon\r" {
@@ -549,13 +630,6 @@ pub fn sort_scanned(files: &mut [ScannedFile]) {
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             .then_with(|| a.path.cmp(&b.path))
     });
-}
-
-pub fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +676,11 @@ pub(crate) mod tests {
                 let _ = s.write_all(&body);
             }
         });
-        TestServer { url, hits, last_request }
+        TestServer {
+            url,
+            hits,
+            last_request,
+        }
     }
 
     fn read_request(s: &mut std::net::TcpStream) -> Vec<u8> {
@@ -674,25 +752,48 @@ pub(crate) mod tests {
         let client = http_client();
         let mut events = Vec::new();
         let r = copy_to_volume(
-            &client, &srv.url, Some("tok"), disk.path(), "/api/files/1/content",
-            "2024/05/fotos/a.jpg", &sha, Some(data.len() as u64),
+            &client,
+            &srv.url,
+            Some("tok"),
+            disk.path(),
+            "/api/files/1/content",
+            "2024/05/fotos/a.jpg",
+            &sha,
+            Some(data.len() as u64),
             |d, t| events.push((d, t)),
         )
         .await
         .unwrap();
-        assert_eq!(r, CopyResult { sha256: sha.clone(), skipped: false });
+        assert_eq!(
+            r,
+            CopyResult {
+                sha256: sha.clone(),
+                skipped: false
+            }
+        );
         let final_path = disk.path().join("2024/05/fotos/a.jpg");
         assert_eq!(fs::read(&final_path).unwrap(), data);
         assert!(!part_path(&final_path).exists());
         assert_eq!(events.last(), Some(&(data.len() as u64, data.len() as u64)));
         let req = String::from_utf8_lossy(&srv.last_request.lock().unwrap()).to_string();
         assert!(req.starts_with("GET /api/files/1/content "), "{req}");
-        assert!(req.to_ascii_lowercase().contains("authorization: bearer tok"), "{req}");
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("authorization: bearer tok"),
+            "{req}"
+        );
 
         // Second time: already there with the right hash -> no download.
         let r2 = copy_to_volume(
-            &client, &srv.url, Some("tok"), disk.path(), "/api/files/1/content",
-            "2024/05/fotos/a.jpg", &sha.to_uppercase(), Some(data.len() as u64), |_, _| {},
+            &client,
+            &srv.url,
+            Some("tok"),
+            disk.path(),
+            "/api/files/1/content",
+            "2024/05/fotos/a.jpg",
+            &sha.to_uppercase(),
+            Some(data.len() as u64),
+            |_, _| {},
         )
         .await
         .unwrap();
@@ -708,8 +809,15 @@ pub(crate) mod tests {
         let disk = tempfile::tempdir().unwrap();
         let expected = sha_hex(b"bytes originais");
         let err = copy_to_volume(
-            &http_client(), &srv.url, None, disk.path(), "/api/files/2/content",
-            "2024/06/fotos/b.jpg", &expected, None, |_, _| {},
+            &http_client(),
+            &srv.url,
+            None,
+            disk.path(),
+            "/api/files/2/content",
+            "2024/06/fotos/b.jpg",
+            &expected,
+            None,
+            |_, _| {},
         )
         .await
         .unwrap_err();
@@ -725,8 +833,15 @@ pub(crate) mod tests {
         let srv = serve(200, data.clone());
         let disk = tempfile::tempdir().unwrap();
         let err = copy_to_volume(
-            &http_client(), &srv.url, None, disk.path(), "/x", "a/b.jpg",
-            &sha_hex(&data), Some(10), |_, _| {},
+            &http_client(),
+            &srv.url,
+            None,
+            disk.path(),
+            "/x",
+            "a/b.jpg",
+            &sha_hex(&data),
+            Some(10),
+            |_, _| {},
         )
         .await
         .unwrap_err();
@@ -741,13 +856,23 @@ pub(crate) mod tests {
         fs::create_dir_all(disk.path().join("a")).unwrap();
         fs::write(disk.path().join("a/b.jpg"), b"outro arquivo").unwrap();
         let err = copy_to_volume(
-            &http_client(), &srv.url, None, disk.path(), "/x", "a/b.jpg",
-            &sha_hex(b"novo"), None, |_, _| {},
+            &http_client(),
+            &srv.url,
+            None,
+            disk.path(),
+            "/x",
+            "a/b.jpg",
+            &sha_hex(b"novo"),
+            None,
+            |_, _| {},
         )
         .await
         .unwrap_err();
         assert!(err.contains("diferente"), "{err}");
-        assert_eq!(fs::read(disk.path().join("a/b.jpg")).unwrap(), b"outro arquivo");
+        assert_eq!(
+            fs::read(disk.path().join("a/b.jpg")).unwrap(),
+            b"outro arquivo"
+        );
         assert_eq!(srv.hits.load(Ordering::SeqCst), 0);
     }
 
@@ -757,8 +882,15 @@ pub(crate) mod tests {
         let disk = tempfile::tempdir().unwrap();
         for bad in ["../fora.jpg", "/etc/x", ".acervo/volume.json"] {
             let r = copy_to_volume(
-                &http_client(), &srv.url, None, disk.path(), "/x", bad,
-                &sha_hex(b"x"), None, |_, _| {},
+                &http_client(),
+                &srv.url,
+                None,
+                disk.path(),
+                "/x",
+                bad,
+                &sha_hex(b"x"),
+                None,
+                |_, _| {},
             )
             .await;
             assert!(r.is_err(), "{bad}");
@@ -777,8 +909,15 @@ pub(crate) mod tests {
         let outside = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(outside.path(), disk.path().join("2024")).unwrap();
         let err = copy_to_volume(
-            &http_client(), &srv.url, None, disk.path(), "/x", "2024/a.jpg",
-            &sha_hex(b"x"), None, |_, _| {},
+            &http_client(),
+            &srv.url,
+            None,
+            disk.path(),
+            "/x",
+            "2024/a.jpg",
+            &sha_hex(b"x"),
+            None,
+            |_, _| {},
         )
         .await
         .unwrap_err();
@@ -791,8 +930,15 @@ pub(crate) mod tests {
         let srv = serve(410, br#"{"error":"no HD","volume":"VOLUME-001"}"#.to_vec());
         let disk = tempfile::tempdir().unwrap();
         let err = copy_to_volume(
-            &http_client(), &srv.url, None, disk.path(), "/x", "a/b.jpg",
-            &sha_hex(b"x"), None, |_, _| {},
+            &http_client(),
+            &srv.url,
+            None,
+            disk.path(),
+            "/x",
+            "a/b.jpg",
+            &sha_hex(b"x"),
+            None,
+            |_, _| {},
         )
         .await
         .unwrap_err();
@@ -805,13 +951,25 @@ pub(crate) mod tests {
         let srv = serve(200, b"<html>novo</html>".to_vec());
         let disk = tempfile::tempdir().unwrap();
         fs::write(disk.path().join("ABRIR-ACERVO.html"), b"velho").unwrap();
-        write_bundle_file(&http_client(), &srv.url, None, disk.path(), "ABRIR-ACERVO.html", "/b")
-            .await
-            .unwrap();
-        assert_eq!(fs::read(disk.path().join("ABRIR-ACERVO.html")).unwrap(), b"<html>novo</html>");
-        assert!(write_bundle_file(&http_client(), &srv.url, None, disk.path(), "../x", "/b")
-            .await
-            .is_err());
+        write_bundle_file(
+            &http_client(),
+            &srv.url,
+            None,
+            disk.path(),
+            "ABRIR-ACERVO.html",
+            "/b",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fs::read(disk.path().join("ABRIR-ACERVO.html")).unwrap(),
+            b"<html>novo</html>"
+        );
+        assert!(
+            write_bundle_file(&http_client(), &srv.url, None, disk.path(), "../x", "/b")
+                .await
+                .is_err()
+        );
     }
 
     #[test]
@@ -821,10 +979,26 @@ pub(crate) mod tests {
         fs::write(disk.path().join("a/ok.jpg"), b"ok").unwrap();
         fs::write(disk.path().join("a/bad.jpg"), b"mudou").unwrap();
         let files = [
-            VerifyFile { file_id: 1, rel_path: "a/ok.jpg".into(), sha256: sha_hex(b"ok") },
-            VerifyFile { file_id: 2, rel_path: "a/bad.jpg".into(), sha256: sha_hex(b"orig") },
-            VerifyFile { file_id: 3, rel_path: "a/sumiu.jpg".into(), sha256: sha_hex(b"x") },
-            VerifyFile { file_id: 4, rel_path: "../x".into(), sha256: sha_hex(b"x") },
+            VerifyFile {
+                file_id: 1,
+                rel_path: "a/ok.jpg".into(),
+                sha256: sha_hex(b"ok"),
+            },
+            VerifyFile {
+                file_id: 2,
+                rel_path: "a/bad.jpg".into(),
+                sha256: sha_hex(b"orig"),
+            },
+            VerifyFile {
+                file_id: 3,
+                rel_path: "a/sumiu.jpg".into(),
+                sha256: sha_hex(b"x"),
+            },
+            VerifyFile {
+                file_id: 4,
+                rel_path: "../x".into(),
+                sha256: sha_hex(b"x"),
+            },
         ];
         let r: Vec<_> = files.iter().map(|f| verify_one(disk.path(), f)).collect();
         assert!(r[0].ok && r[0].error.is_none());
@@ -850,8 +1024,15 @@ pub(crate) mod tests {
         ] {
             fs::write(d.join(p), c).unwrap();
         }
-        let names: Vec<_> = scan_folder(d).unwrap().into_iter().map(|f| f.name).collect();
-        assert_eq!(names, ["IMG_1.jpg", "IMG_2.HEIC", "nota.pdf", "a.mp4", "IMG_2.MOV"]);
+        let names: Vec<_> = scan_folder(d)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["IMG_1.jpg", "IMG_2.HEIC", "nota.pdf", "a.mp4", "IMG_2.MOV"]
+        );
         assert!(scan_folder(&d.join("nao-existe")).is_err());
     }
 

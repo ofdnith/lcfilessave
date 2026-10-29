@@ -6,6 +6,7 @@ version = 4
 name = "acervo"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "futures-util",
  "hex",
  "libc",

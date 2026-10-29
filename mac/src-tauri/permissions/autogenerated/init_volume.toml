@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-init-volume"
+description = "Enables the init_volume command without any pre-configured scope."
+commands.allow = ["init_volume"]
+
+[[permission]]
+identifier = "deny-init-volume"
+description = "Denies the init_volume command without any pre-configured scope."
+commands.deny = ["init_volume"]
