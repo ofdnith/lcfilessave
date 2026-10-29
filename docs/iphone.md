@@ -41,9 +41,16 @@ Ele abre em tela cheia, com a barra de abas embaixo, como um app.
 
 ## 4. Token para os Atalhos (uma vez)
 
-No Termux do Realme: `acervo-ctl token iPhone`. Copie o texto que aparece
-(ex.: `k3J9…`). Ele vai em todos os pedidos dos Atalhos no cabeçalho
+No web app: **Ajustes → Configurar iPhone → Criar token para os Atalhos** e toque
+em **Copiar** (ou, no servidor, `acervo-ctl token iPhone`). O texto (ex.: `k3J9…`)
+só aparece uma vez. Ele vai em todos os pedidos dos Atalhos no cabeçalho
 `Authorization` com o valor `Bearer k3J9…` (a palavra Bearer, um espaço e o token).
+
+Se os atalhos prontos já foram publicados (links do iCloud), eles aparecem na mesma
+tela de Ajustes: toque para instalar, e o iPhone pergunta o endereço e o token.
+Para publicar os seus depois de montá-los uma vez: no app Atalhos, segure o atalho →
+**Compartilhar → Copiar Link do iCloud** e coloque os links no `acervo.toml`
+(`shortcut_manual_url` e `shortcut_daily_url`).
 
 Dica: crie primeiro um atalho chamado **Acervo config** com uma única ação
 **Dicionário** contendo `servidor = https://192.168.0.50:8765` e
@@ -74,25 +81,21 @@ Uso: no app Fotos, selecione as fotos → Compartilhar → **Mandar pro backup**
 
 ## 6. Atalho "Backup diário" (automático)
 
-Novo atalho, nome **Backup diário**:
+Novo atalho, nome **Backup diário**. O servidor cuida da sessão sozinho, então
+são poucas ações:
 
 1. **Executar Atalho** "Acervo config" → `Config`.
 2. **Obter Conteúdo do URL** `[Config.servidor]/api/daily` (GET, cabeçalho
-   `Authorization`) → **Obter Valor do Dicionário** `last_at` → variável `Último`.
-3. **Se** `Último` *não tem valor* → **Ajustar Data** "Data Atual" *subtrair 7 dias*;
-   **Senão** → **Ajustar Data** `Último` *subtrair 1 dia*. Resultado → variável `Desde`.
-4. **Buscar Fotos** onde *Data de Criação* **é depois de** `Desde`;
-   ordenar por Data de Criação, mais antigas primeiro; **limite 300**.
-5. **Obter Conteúdo do URL** `[Config.servidor]/api/sessions`, POST, JSON
-   `source` = `iphone-daily` → **Obter Valor do Dicionário** `id` → `Sessão`.
-6. **Repetir com Cada** foto:
-   - **Formatar Data** *Data de Criação* do Item Repetido → formato **ISO 8601** → `Criada`.
-   - **Obter Conteúdo do URL**
-     `[Config.servidor]/api/upload?source=iphone-daily&session_id=[Sessão]&created_at=[Criada]`
-     (POST, cabeçalho `Authorization`, Formulário com `file` = *Item Repetido*).
-7. **Obter Conteúdo do URL** `[Config.servidor]/api/sessions/[Sessão]/finish` (POST).
-8. **Obter Valor do Dicionário** `summary_text` → **Mostrar Notificação**
-   (ex.: "Backup diário: 37 fotos, 4 vídeos").
+   `Authorization` = `[Config.token]`) → **Obter Valor do Dicionário** `since` →
+   **Obter Datas do Texto** → variável `Desde`.
+3. **Buscar Fotos** onde *Data de Criação* **é depois de** `Desde`; ordenar por
+   Data de Criação, mais antigas primeiro; **limite 300**.
+4. **Repetir com Cada** foto → **Obter Conteúdo do URL**
+   `[Config.servidor]/api/upload?source=iphone-daily` (POST, cabeçalho
+   `Authorization`, corpo **Formulário** com o campo Arquivo `file` = *Item Repetido*).
+5. **Obter Conteúdo do URL** `[Config.servidor]/api/daily/finish` (POST, cabeçalho
+   `Authorization`) → **Obter Valor do Dicionário** `summary_text` → **Mostrar
+   Notificação** (ex.: "Backup diário: 37 fotos, 4 vídeos").
 
 O atalho **não tem nenhuma ação de apagar** — e não deve ter (regra 1). Tudo o que
 ele envia cai na **Entrada** (regra 2). Fotos que já estão no Acervo, foram para
@@ -106,7 +109,32 @@ Imediatamente** (desative "Notificar ao Executar") → ação **Executar Atalho*
 
 O web app mostra a hora do último backup diário e avisa se passar de 48 horas.
 
-## 7. Limites do iPhone (testado em cada instalação)
+## 7. Avisos no iPhone
+
+Com o web app na tela de início (passo 3) e o iOS 16.4 ou mais novo:
+**Ajustes → Avisos → Receber avisos** e permita as notificações. Escolha o que quer receber:
+
+- **Backup diário atrasado** — o iPhone não manda fotos há mais de 48 h.
+- **Servidor ficando cheio** — hora de transferir um lote para um HD.
+- **Problema num HD** — a verificação de saúde achou arquivo que não confere.
+- **Resumo do backup diário** — "Backup diário: 37 fotos, 4 vídeos".
+
+Toque em **Enviar aviso de teste** para conferir. O servidor só manda o aviso
+para o serviço de notificações da Apple; nenhuma porta é aberta.
+
+## 8. Fora de casa
+
+Pelo Tailscale, o Acervo abre em **modo seguro**: dá para ver, buscar, baixar,
+enviar, manter itens da Entrada, marcar importantes e mexer em álbuns. Descartar,
+esvaziar a lixeira e mexer em HDs ficam só para a rede de casa. Assim, um celular
+perdido e desbloqueado não consegue apagar nada. Para liberar tudo também fora de
+casa, use `remote_mode = "completo"` no `acervo.toml`.
+
+Use sempre o endereço com o **nome fixo** do Tailscale
+(`https://acervo.<sua-rede>.ts.net:8765`, veja `docs/migrar.md`, passo 0). Assim,
+se um dia o servidor mudar do Realme para um mini PC, nada muda no iPhone.
+
+## 9. Limites do iPhone (testado em cada instalação)
 
 - **Live Photos:** pelos Atalhos chega só a foto (HEIC); o vídeo curto da Live Photo
   só vem pelo **Esvaziar iPhone**, pelo Mac. Quando ele chegar, o Acervo junta os
@@ -117,7 +145,7 @@ O web app mostra a hora do último backup diário e avisa se passar de 48 horas.
   Acervo e veja em *Informações* se o tipo é HEIC e a câmera aparece. Se vier
   JPEG, revise o passo 1.
 
-## 8. Esvaziar iPhone (pelo Mac, com cabo)
+## 10. Esvaziar iPhone (pelo Mac, com cabo)
 
 Para liberar espaço no iPhone com segurança:
 

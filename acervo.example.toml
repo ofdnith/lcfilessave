@@ -37,3 +37,15 @@ trash_days = 30
 
 # Cópia diária do catálogo (as 7 mais recentes ficam).
 # catalog_backup_dir = "copias-do-catalogo"
+
+# Fora de casa (pedidos que chegam pelo Tailscale):
+#   "seguro"   = ver, buscar, enviar, manter e álbuns; nada de apagar nem mexer em HDs
+#   "completo" = tudo liberado
+remote_mode = "seguro"
+
+# Links do iCloud dos atalhos prontos (aparecem em Ajustes → Configurar iPhone).
+# shortcut_manual_url = "https://www.icloud.com/shortcuts/…"
+# shortcut_daily_url = "https://www.icloud.com/shortcuts/…"
+
+# Contato que acompanha os avisos (exigência do serviço da Apple).
+# push_contact = "mailto:voce@exemplo.com"

@@ -139,7 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "baixar-cidades":
         from .places import download
         print("Baixando a base de cidades da GeoNames (~10 MB)…")
-        download(cfg.subdir(GEO_DIR))
+        try:
+            download(cfg.subdir(GEO_DIR))
+        except OSError as exc:
+            print(f"Não consegui baixar agora ({getattr(exc, 'reason', exc)}). "
+                  "Tente mais tarde com: acervo-ctl cidades", file=sys.stderr)
+            return 1
         print("Pronto. As fotos com GPS ganham o nome do lugar nas próximas horas.")
         return 0
 
