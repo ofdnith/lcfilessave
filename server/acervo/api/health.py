@@ -15,6 +15,18 @@ from ..storage import disk_usage, missing_or_unwritable
 router = APIRouter()
 
 
+def _migration(cfg: Config) -> dict:
+    try:
+        conn = db.connect(cfg.db_path)
+        try:
+            row = conn.execute("SELECT value FROM settings WHERE key = 'migration_active'").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return {"active": False, "started_at": None}
+    return {"active": row is not None, "started_at": row[0] if row else None}
+
+
 @router.get("/api/health")
 def health(request: Request) -> JSONResponse:
     cfg: Config = request.app.state.config
@@ -67,6 +79,7 @@ def health(request: Request) -> JSONResponse:
         "catalog": catalog,
         "storage": storage,
         "tools": tools,
+        "migration": _migration(cfg),
         "problems": problems,
     }
     return JSONResponse(body, status_code=200 if ok else 503)

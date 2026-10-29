@@ -53,6 +53,12 @@ class Config:
     sd_dir: Path | None = None
     catalog_backup_dir: Path | None = None
     web_dir: Path = field(default_factory=lambda: REPO_WEB_DIST)
+    # Away from home (Tailscale): "seguro" forbids deleting and drive operations.
+    remote_mode: str = "seguro"
+    remote_networks: tuple[str, ...] = ("100.64.0.0/10", "fd7a:115c:a1e0::/48")
+    shortcut_manual_url: str = ""
+    shortcut_daily_url: str = ""
+    push_contact: str = "mailto:acervo@example.com"
     workers: bool = True  # background jobs (thumbnails, OCR…); tests turn them off
     config_file: Path | None = None
 
@@ -79,6 +85,13 @@ class Config:
             raise ConfigError("archive_batch_gb deve ser maior que zero.")
         if self.archive_copies not in (1, 2, 3):
             raise ConfigError("archive_copies deve ser 1, 2 ou 3.")
+        if self.remote_mode not in ("seguro", "completo"):
+            raise ConfigError('remote_mode deve ser "seguro" ou "completo".')
+        for net in self.remote_networks:
+            try:
+                ipaddress.ip_network(net)
+            except ValueError:
+                raise ConfigError(f"remote_networks: rede inválida '{net}'.") from None
         if self.trash_days < 30:
             # Inviolable rule 6: discarded items spend 30 days in the trash.
             raise ConfigError("trash_days não pode ser menor que 30 (regra da lixeira).")
@@ -94,10 +107,11 @@ def is_loopback(host: str) -> bool:
 
 
 _INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", "trash_days"}
-_STR_KEYS = {"host", "server_name"}
+_STR_KEYS = {"host", "server_name", "remote_mode", "shortcut_manual_url", "shortcut_daily_url", "push_contact"}
 _BOOL_KEYS = {"https", "workers"}
 _PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir"}
-_ALLOWED_KEYS = _INT_KEYS | _STR_KEYS | _BOOL_KEYS | _PATH_KEYS | {"tls_names"}
+_LIST_KEYS = {"tls_names", "remote_networks"}
+_ALLOWED_KEYS = _INT_KEYS | _STR_KEYS | _BOOL_KEYS | _PATH_KEYS | _LIST_KEYS
 
 
 def load_config(path: str | os.PathLike[str] | None = None, **overrides: object) -> Config:
@@ -134,11 +148,11 @@ def load_config(path: str | os.PathLike[str] | None = None, **overrides: object)
     for key in _BOOL_KEYS & set(values):
         if not isinstance(values[key], bool):
             raise ConfigError(f"'{key}' precisa ser true ou false.")
-    if "tls_names" in values:
-        names = values["tls_names"]
+    for key in _LIST_KEYS & set(values):
+        names = values[key]
         if not isinstance(names, (list, tuple)) or not all(isinstance(n, str) for n in names):
-            raise ConfigError("'tls_names' precisa ser uma lista de textos.")
-        values["tls_names"] = tuple(names)
+            raise ConfigError(f"'{key}' precisa ser uma lista de textos.")
+        values[key] = tuple(names)
 
     cfg = Config(config_file=file_path, **values)  # type: ignore[arg-type]
     cfg.validate()

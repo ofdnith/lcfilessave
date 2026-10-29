@@ -239,3 +239,110 @@ Fluxo da transferência:
 - `GET /api/health` — sem login. Estado do servidor, catálogo e disco.
 - `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version}`.
 - `GET /ca.crt` — certificado para instalar no iPhone/Mac quando o HTTPS próprio está ativo.
+
+---
+
+# Versão 0.2 — melhorias
+
+Tudo abaixo soma-se ao que está acima; nada mudou de forma incompatível.
+
+## Prévia média (fica para sempre)
+
+Toda foto e vídeo ganha uma prévia WebP de até 1024 px (~100 KB), gerada junto com a
+miniatura e **guardada mesmo depois que o original vai para o HD**.
+
+- `Item.medium_url`: `/api/items/{id}/medium` ou `null` (ainda não gerada / tipo sem imagem).
+- `GET /api/items/{id}/medium` → `image/webp`. 404 se não existe.
+- No visualizador: mostrar `medium_url` primeiro (rápido, inclusive fora de casa) e só
+  carregar `preview_url`/`original_url` quando a pessoa pedir ("Ver original") ou der zoom.
+
+## Triagem em um toque
+
+- `GET /api/inbox/summary` → `{total, flagged, clean}` — `flagged` = itens da Entrada que
+  estão em alguma sugestão aberta; `clean` = o resto.
+- `POST /api/inbox/keep-clean` → `{kept, flagged_left}` — mantém (Entrada → Acervo) todos
+  os itens que **não** estão em sugestão aberta. Os sinalizados ficam para decidir.
+
+## Neste dia
+
+`GET /api/memories?date=MM-DD` (padrão: hoje no servidor) →
+`{date: "10-29", years: [{year: 2023, years_ago: 3, count: 41, items: [Item]}]}`
+— só Acervo/arquivados, fotos e vídeos, anos anteriores, até 30 itens por ano (os
+importantes primeiro). `years` vazio quando não há nada.
+
+## Lugares e mapa
+
+- `GET /api/places` → `{places: [{place, count, lat, lon, cover: Item}]}` (até 500, mais fotos primeiro).
+- `GET /api/map/points` → `{points: [[id, lat, lon], …]}` — tudo do Acervo com GPS, compacto.
+- `GET /api/items?place=<texto exato de place>` filtra por lugar.
+- Mapa: Leaflet com mapas do OpenStreetMap (precisa de internet no aparelho que olha; o
+  servidor não manda nada para fora). Atribuição "© OpenStreetMap" obrigatória.
+
+## Álbuns
+
+| Método | Rota | Corpo | Resposta |
+|---|---|---|---|
+| GET | `/api/albums` | — | `{albums: [Album]}` |
+| POST | `/api/albums` | `{name}` | `Album` |
+| PATCH | `/api/albums/{id}` | `{name?, cover_item_id?}` | `Album` |
+| DELETE | `/api/albums/{id}` | — | `{ok}` (apaga só o álbum, nunca os itens) |
+| POST | `/api/albums/{id}/items` | `{ids}` | `{added}` |
+| POST | `/api/albums/{id}/items/remove` | `{ids}` | `{removed}` |
+
+`Album = {id, name, count, cover: Item|null, created_at, updated_at}`.
+`GET /api/items?album_id=N` e `/api/timeline?album_id=N` filtram pelo álbum (qualquer `view`).
+`GET /api/items/{id}` traz `albums: [{id, name}]`.
+
+## Atalhos do iPhone sem complicação
+
+- `GET /api/tokens` → `{tokens: [{id, label, created_at, last_used_at}]}`
+- `POST /api/tokens` `{label}` → `{id, token}` (o token só aparece nessa resposta)
+- `DELETE /api/tokens/{id}` → `{ok}`
+- `GET /api/shortcuts` → `{links: {manual: url|null, daily: url|null}}` — links do iCloud
+  dos atalhos prontos, configurados no `acervo.toml` (`shortcut_manual_url`, `shortcut_daily_url`).
+
+Backup diário simplificado (o atalho fica com 4 ações):
+- `GET /api/daily` agora também traz `since` (ISO: último backup menos 1 dia, ou 7 dias atrás).
+- `POST /api/upload?source=iphone-daily` **sem** `session_id` → entra sozinho na sessão
+  diária de hoje (criada na primeira foto).
+- `POST /api/daily/finish` → `Session` da sessão de hoje (`summary_text` pronto para a
+  notificação: "Backup diário: 37 fotos, 4 vídeos"). Sem sessão: "Backup diário: nada novo".
+
+## Avisos (Web Push)
+
+Só funciona no web app instalado na tela de início (iOS 16.4+) e com HTTPS.
+
+- `GET /api/push/key` → `{public_key}` (VAPID, base64url) — 404 se o servidor não tem suporte.
+- `POST /api/push/subscribe` `{subscription: <PushSubscription.toJSON()>, topics: [...]}` → `{ok}`
+- `POST /api/push/unsubscribe` `{endpoint}` → `{ok}`
+- `GET /api/push/status?endpoint=…` → `{subscribed, topics}`
+- `POST /api/push/test` `{endpoint}` → `{ok}` (manda "Avisos do Acervo funcionando")
+- Tópicos: `backup_atrasado` (passou de 48 h), `espaco` (passou do alerta),
+  `hd_problema` (verificação achou erro), `backup_concluido` (resumo do backup diário).
+- Payload que chega no service worker: `{title, body, url}` — abrir `url` ao tocar.
+
+## Fora de casa: modo seguro
+
+Pedidos que chegam pelo Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48) contam como
+"fora de casa". Com `remote_mode = "seguro"` (padrão), fora de casa é proibido:
+descartar, esvaziar lixeira, arquivar em HD (`/api/archive/*`, criar/verificar volume),
+criar/revogar tokens e migração. Ver, buscar, baixar, enviar, manter, marcar importante e
+álbuns continuam liberados. Bloqueado → 403 `{detail}` em português.
+
+`GET /api/auth/status` traz também `{remote: bool, readonly: bool}` — com `readonly`, a
+interface esconde os botões proibidos e mostra "Fora de casa · modo seguro".
+
+## Migração (servidor antigo → servidor novo)
+
+Usado pelo comando `acervo migrar` no servidor novo; precisa de um token (`acervo token criar migracao`).
+
+| Método | Rota | Resposta |
+|---|---|---|
+| POST | `/api/migration/start` | `{active, started_at}` — servidor antigo entra em modo migração: tudo que altera dados responde 423 |
+| POST | `/api/migration/cancel` | `{active: false}` |
+| GET | `/api/migration/catalog` | cópia consistente do `catalogo.db` (API de backup do SQLite) |
+| GET | `/api/migration/manifest` | `{files: [{kind, path, size, sha256}]}` — originais (sha do catálogo), miniaturas, prévias médias, certificados, base de cidades |
+| GET | `/api/migration/file?kind=…&path=…` | bytes do arquivo (só caminhos do manifesto) |
+
+`/api/health` traz `migration: {active, started_at}`; a interface mostra uma faixa
+"Migração em andamento — o Acervo está só para consulta".

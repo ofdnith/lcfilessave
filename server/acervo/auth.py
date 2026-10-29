@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import sqlite3
 import threading
@@ -170,6 +171,27 @@ def _forwarded(request: Request) -> bool:
     # Behind a local proxy (e.g. `tailscale serve`) the peer is 127.0.0.1 but
     # the user is remote: never treat that as "this computer".
     return any(h in request.headers for h in ("x-forwarded-for", "x-real-ip", "forwarded"))
+
+
+def is_remote(request: Request) -> bool:
+    """Away from home = the request comes through Tailscale (or another configured network)."""
+    cfg = request.app.state.config
+    try:
+        addr = ipaddress.ip_address(client_addr(request))
+    except ValueError:
+        return False
+    return any(addr in ipaddress.ip_network(net) for net in cfg.remote_networks)
+
+
+def readonly(request: Request) -> bool:
+    return request.app.state.config.remote_mode == "seguro" and is_remote(request)
+
+
+def forbid_remote(request: Request) -> None:
+    """Dependency for destructive / administrative actions (modo seguro fora de casa)."""
+    if readonly(request):
+        raise HTTPException(status_code=403, detail="Fora de casa o Acervo está em modo seguro: "
+                                                      "apagar e mexer em HDs só pela rede de casa.")
 
 
 def require_auth(request: Request) -> str:

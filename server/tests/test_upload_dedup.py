@@ -158,7 +158,8 @@ def test_empty_iphone_session_is_safe_only_when_every_file_is_verified(api, tmp_
 
 
 def test_daily_backup_summary_and_last_time(api, tmp_path):
-    assert api.get("/api/daily").json() == {"last_at": None, "overdue": False}
+    daily = api.get("/api/daily").json()
+    assert daily["last_at"] is None and daily["overdue"] is False and daily["since"]
     s = api.post("/api/sessions", json={"source": "iphone-daily"}).json()
     api.upload(make_jpeg(tmp_path / "IMG_1.JPG"), source="iphone-daily", session_id=s["id"])
     api.upload(make_jpeg(tmp_path / "IMG_2.JPG", color=(1, 2, 3)), source="iphone-daily", session_id=s["id"])

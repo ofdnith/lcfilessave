@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from .. import auth, db
+from .. import auth, db, push
 from ..catalog import drive_rel_path, log_event, now_iso, transaction
 from ..volume_export import build_open_html, build_volume_db, volume_items
 
@@ -68,7 +68,7 @@ class NewVolume(BaseModel):
     id: str | None = None
 
 
-@router.post("/volumes")
+@router.post("/volumes", dependencies=[Depends(auth.forbid_remote)])
 def create_volume(body: NewVolume, request: Request) -> dict:
     if body.filesystem.lower() != "exfat":
         raise HTTPException(400, "O HD precisa estar formatado em exFAT.")
@@ -169,7 +169,7 @@ class Verified(BaseModel):
     copies: list[Copy] = Field(max_length=5000)
 
 
-@router.post("/archive/verified")
+@router.post("/archive/verified", dependencies=[Depends(auth.forbid_remote)])
 def archive_verified(body: Verified, request: Request) -> dict:
     accepted, rejected = [], []
     conn = _conn(request)
@@ -254,7 +254,7 @@ def _commit(cfg, volume_id: str) -> dict:
     return {"archived_items": archived, "freed_bytes": freed}
 
 
-@router.post("/archive/commit")
+@router.post("/archive/commit", dependencies=[Depends(auth.forbid_remote)])
 async def archive_commit(body: Commit, request: Request) -> dict:
     return await run_in_threadpool(_commit, request.app.state.config, body.volume_id)
 
@@ -321,7 +321,7 @@ class Check(BaseModel):
     checked_file_ids: list[int] = []
 
 
-@router.post("/volumes/{volume_id}/checks")
+@router.post("/volumes/{volume_id}/checks", dependencies=[Depends(auth.forbid_remote)])
 def volume_check(volume_id: str, body: Check, request: Request) -> dict:
     if body.kind not in ("partial", "full"):
         raise HTTPException(400, "kind deve ser partial ou full")
@@ -340,6 +340,10 @@ def volume_check(volume_id: str, body: Check, request: Request) -> dict:
                           details={"error": p.error[:300]})
             if bad:
                 conn.execute("UPDATE volumes SET status = 'problem', last_seen_at = ? WHERE id = ?", (now, volume_id))
+                vname = conn.execute("SELECT name FROM volumes WHERE id = ?", (volume_id,)).fetchone()[0]
+                push.notify(request.app.state.config, "hd_problema", f"Problema no {vname}",
+                            f"{len(bad)} arquivo(s) não conferem. Os originais continuam no servidor ou em outro HD; "
+                            "faça uma verificação completa.", "/")
             elif body.kind == "full":
                 conn.execute("UPDATE volumes SET last_full_check_at = ?, last_seen_at = ?, "
                              "status = CASE status WHEN 'problem' THEN 'active' ELSE status END WHERE id = ?",
