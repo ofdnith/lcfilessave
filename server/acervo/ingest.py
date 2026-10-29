@@ -315,13 +315,15 @@ class Ingestor:
                 """INSERT INTO items (sha256, kind, is_live_photo, live_photo_id, mime, size_bytes,
                        captured_at, captured_tz, date_source, source, upload_session_id, original_name,
                        standard_name, width, height, duration_ms, gps_lat, gps_lon, camera_make,
-                       camera_model, is_screenshot, burst_id, origin_app, meta_status, thumb_status)
-                   VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?)""",
+                       camera_model, is_screenshot, burst_id, origin_app, meta_status, thumb_status,
+                       medium_status)
+                   VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)""",
                 (sha, kind, md.live_photo_id if kind == "photo" else None, mime, size, captured_at,
                  captured_tz, date_source, source, session_id, filename, rel.rsplit("/", 1)[1],
                  md.width, md.height, md.duration_ms, md.gps_lat, md.gps_lon, md.camera_make,
                  md.camera_model, int(screenshot), md.burst_id, origin_app,
-                 "pending" if kind in ("photo", "video") or mime == "application/pdf" else "none"),
+                 "pending" if kind in ("photo", "video") or mime == "application/pdf" else "none",
+                 "pending" if kind in ("photo", "video") else "none"),
             ).lastrowid
             file_id = conn.execute(
                 "INSERT INTO files (item_id, role, sha256, size_bytes, mime, ext, rel_path, root) "

@@ -46,6 +46,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("baixar-cidades", help="baixa a base de cidades para o lugar das fotos")
     sub.add_parser("processar", help="roda as tarefas pendentes agora")
     sub.add_parser("verificar", help="confere disco × catálogo")
+    mig = sub.add_parser("migrar", help="traz o acervo de outro servidor para esta máquina")
+    mig.add_argument("--de", required=True, help="endereço do servidor antigo, ex.: https://192.168.0.50:8765")
+    mig.add_argument("--token", help="token criado no servidor antigo (acervo token criar migracao)")
+    mig.add_argument("--cancelar", action="store_true", help="destrava o servidor antigo e desiste da migração")
+    mig.add_argument("--sim", action="store_true", help="não perguntar (confiar no certificado mostrado)")
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -66,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"lote de arquivamento:    {cfg.archive_batch_gb} GB · cópias em HD: {cfg.archive_copies}")
         print(f"dias na lixeira:         {cfg.trash_days}")
         print(f"interface:               {cfg.web_dir}")
+        ca = cfg.subdir(CERTS_DIR) / "ca.crt"
+        if ca.exists():
+            from .migrate import ca_fingerprint
+            print(f"certificado (impressão): {ca_fingerprint(ca.read_bytes())}")
         return 0
 
     from .app import prepare  # imported late so `acervo config` works without FastAPI
@@ -134,6 +143,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Pronto. As fotos com GPS ganham o nome do lugar nas próximas horas.")
         return 0
 
+    if args.command == "migrar":
+        return _migrar(cfg, args)
+
     if args.command in ("processar", "verificar"):
         from . import media
         from .ingest import Ingestor, reconcile
@@ -184,6 +196,49 @@ def main(argv: list[str] | None = None) -> int:
 
     uvicorn.run("acervo.app:app_factory", factory=True, host=cfg.host, port=cfg.port, reload=args.reload,
                 log_level="info", timeout_keep_alive=30, **ssl)
+    return 0
+
+
+def _migrar(cfg, args) -> int:
+    from . import migrate
+    from .storage import DataDirBusy, lock_data_dir
+    token = args.token or getpass.getpass("Token do servidor antigo: ").strip()
+    ca_file = None
+    if args.de.startswith("https://"):
+        pem, fingerprint = migrate.fetch_ca(args.de)
+        print(f"Certificado do servidor antigo: {fingerprint}")
+        print("Confira: no servidor antigo, `acervo-ctl status` (ou `acervo config`) mostra a mesma impressão.")
+        if not args.sim and input("Confere? [s/N] ").strip().lower() != "s":
+            print("Migração cancelada.")
+            return 1
+        ca_file = cfg.subdir("tmp") / "ca-servidor-antigo.crt"
+        ca_file.parent.mkdir(parents=True, exist_ok=True)
+        ca_file.write_bytes(pem)
+    source = migrate.Source(args.de, token, ca_file=ca_file)
+    if args.cancelar:
+        migrate.cancel(source)
+        print("Servidor antigo destravado. Nada foi apagado em lugar nenhum.")
+        return 0
+    try:
+        lock = lock_data_dir(cfg)
+    except DataDirBusy as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    try:
+        report = migrate.run(cfg, source)
+    except migrate.MigrationError as exc:
+        print(f"Migração interrompida: {exc}\nRode o mesmo comando de novo para continuar.", file=sys.stderr)
+        return 1
+    finally:
+        lock.close()
+    print(f"\nOriginais conferidos: {report.originals + report.skipped} · outros arquivos: {report.aux} · "
+          f"{report.bytes / 1e9:.2f} GB copiados")
+    if report.failed:
+        print(f"{len(report.failed)} arquivo(s) com problema — veja {cfg.data_dir / 'MIGRACAO.txt'}. "
+              "Rode o mesmo comando de novo para tentar só esses.", file=sys.stderr)
+        return 1
+    print("Migração completa. O servidor antigo continua intacto e só para consulta.")
+    print("Próximo passo (docs/migrar.md): acervo certificado, reiniciar o serviço, conferir, desligar o antigo.")
     return 0
 
 

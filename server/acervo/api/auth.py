@@ -24,8 +24,9 @@ def status(request: Request) -> dict:
         has_password = auth.password_set(conn)
     finally:
         conn.close()
-    return {"password_set": has_password, "authenticated": auth.identify(request) is not None,
-            "method": auth.identify(request)}
+    method = auth.identify(request)
+    return {"password_set": has_password, "authenticated": method is not None, "method": method,
+            "remote": auth.is_remote(request), "readonly": auth.readonly(request)}
 
 
 @router.post("/login")
@@ -65,7 +66,7 @@ def logout(request: Request, response: Response) -> dict:
     return {"ok": True}
 
 
-@router.post("/app-token", dependencies=[Depends(auth.require_auth)])
+@router.post("/app-token", dependencies=[Depends(auth.require_auth), Depends(auth.forbid_remote)])
 def app_token(request: Request) -> dict:
     """Long-lived token for the Mac app's native commands (downloads to drives, uploads)."""
     cfg = request.app.state.config
@@ -78,3 +79,54 @@ def app_token(request: Request) -> dict:
     finally:
         conn.close()
     return {"token": token}
+
+
+# --- tokens for the iPhone Shortcuts, managed from the interface ----------------------------
+
+tokens_router = APIRouter(prefix="/api", dependencies=[Depends(auth.require_auth)])
+
+
+@tokens_router.get("/tokens")
+def list_tokens(request: Request) -> dict:
+    conn = db.connect(request.app.state.config.db_path)
+    try:
+        rows = conn.execute("SELECT id, label, created_at, last_used_at FROM auth_tokens "
+                            "WHERE kind = 'api' AND revoked_at IS NULL ORDER BY id DESC").fetchall()
+    finally:
+        conn.close()
+    return {"tokens": [dict(r) for r in rows]}
+
+
+class TokenBody(BaseModel):
+    label: str = "iPhone"
+
+
+@tokens_router.post("/tokens", dependencies=[Depends(auth.forbid_remote)])
+def create_api_token(body: TokenBody, request: Request) -> dict:
+    conn = db.connect(request.app.state.config.db_path)
+    try:
+        if not auth.password_set(conn):
+            raise HTTPException(409, "Defina uma senha no servidor antes (acervo senha).")
+        with transaction(conn):
+            token = auth.create_token(conn, "api", body.label.strip() or "iPhone")
+            tid = conn.execute("SELECT max(id) FROM auth_tokens").fetchone()[0]
+    finally:
+        conn.close()
+    return {"id": tid, "token": token}
+
+
+@tokens_router.delete("/tokens/{token_id}", dependencies=[Depends(auth.forbid_remote)])
+def revoke_api_token(token_id: int, request: Request) -> dict:
+    conn = db.connect(request.app.state.config.db_path)
+    try:
+        conn.execute("UPDATE auth_tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                     "WHERE id = ? AND kind = 'api'", (token_id,))
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@tokens_router.get("/shortcuts")
+def shortcuts(request: Request) -> dict:
+    cfg = request.app.state.config
+    return {"links": {"manual": cfg.shortcut_manual_url or None, "daily": cfg.shortcut_daily_url or None}}

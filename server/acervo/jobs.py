@@ -22,7 +22,7 @@ import time
 from datetime import date
 
 from . import db, media, power
-from .catalog import get_setting, iso_in, now_iso, preview_path, set_setting, thumb_path, transaction
+from .catalog import get_setting, iso_in, medium_path, now_iso, preview_path, set_setting, thumb_path, transaction
 from .config import Config
 from .ingest import add_suggestion
 from .library import purge_expired, resolve_suggestions
@@ -110,6 +110,8 @@ class Worker:
     def run_once(self) -> bool:
         conn = db.connect(self.cfg.db_path)
         try:
+            if get_setting(conn, "migration_active"):
+                return False  # frozen while the files are copied to the new server
             now = now_iso()
             job = conn.execute(
                 """UPDATE jobs SET status = 'running', started_at = ?, updated_at = ?, attempts = attempts + 1
@@ -135,7 +137,8 @@ class Worker:
                     ("failed" if final else "pending", str(exc)[:500],
                      iso_in(2 ** job["attempts"] / 1440), now_iso(), job["id"]))
                 if final and job["kind"] == "thumbnail":
-                    conn.execute("UPDATE items SET thumb_status = 'failed' WHERE id = ?", (job["item_id"],))
+                    conn.execute("UPDATE items SET thumb_status = 'failed', medium_status = CASE medium_status "
+                                 "WHEN 'pending' THEN 'failed' ELSE medium_status END WHERE id = ?", (job["item_id"],))
             else:
                 conn.execute("UPDATE jobs SET status = 'done', last_error = NULL, updated_at = ? WHERE id = ?",
                              (now_iso(), job["id"]))
@@ -158,12 +161,16 @@ class Worker:
             return
         im = media.render_source(path, item["kind"], item["ext"], self.exiftool)
         media.write_thumbnail(im, thumb_path(self.cfg, item["sha256"]))
+        medium = "none"
+        if item["kind"] in ("photo", "video"):
+            media.write_medium(im, medium_path(self.cfg, item["sha256"]))
+            medium = "ok"
         phash = media.phash(im) if item["kind"] == "photo" else None
         with transaction(conn):
             conn.execute(
-                "UPDATE items SET thumb_status = 'ok', phash = ?, width = coalesce(width, ?), "
-                "height = coalesce(height, ?) WHERE id = ?",
-                (phash, im.width, im.height, item_id))
+                "UPDATE items SET thumb_status = 'ok', medium_status = ?, phash = coalesce(phash, ?), "
+                "width = coalesce(width, ?), height = coalesce(height, ?) WHERE id = ?",
+                (medium, phash, im.width, im.height, item_id))
             if phash is not None and item["state"] == "inbox":
                 self._group_near_duplicates(conn, item, phash)
 
@@ -227,13 +234,17 @@ class Worker:
         cfg = self.cfg
         conn = db.connect(cfg.db_path)
         try:
+            if get_setting(conn, "migration_active"):
+                return
             today = date.today().isoformat()
             if get_setting(conn, "last_purge_date") != today:
                 purge_expired(cfg)
                 set_setting(conn, "last_purge_date", today)
             resolve_suggestions(conn)
+            self._backfill_medium(conn)
             self._expire_uploads(conn)
             conn.execute("DELETE FROM jobs WHERE status = 'done' AND updated_at < ?", (iso_in(-7),))
+            self._notices(conn, today)
             if cfg.catalog_backup_dir is not None and get_setting(conn, "last_backup_date") != today:
                 self._backup_catalog(conn, today)
                 set_setting(conn, "last_backup_date", today)
@@ -241,6 +252,38 @@ class Worker:
         finally:
             conn.close()
         self._trim_previews()
+
+    def _notices(self, conn: sqlite3.Connection, today: str) -> None:
+        """Push notifications for things the owner should know without opening the app."""
+        from . import push
+        from .storage import disk_usage
+        last = get_setting(conn, "last_daily_backup_at")
+        if last and last < iso_in(-2) and get_setting(conn, "notice_overdue_date") != today:
+            set_setting(conn, "notice_overdue_date", today)
+            push.notify(self.cfg, "backup_atrasado", "Backup diário atrasado",
+                        "O iPhone não manda fotos há mais de 48 horas. Confira a automação do Atalhos.", "/#/ajustes")
+        usage = disk_usage(self.cfg.data_dir)
+        server_bytes = conn.execute("SELECT coalesce(sum(size_bytes), 0) FROM files WHERE rel_path IS NOT NULL").fetchone()[0]
+        full = usage.used_pct >= self.cfg.storage_alert_pct or server_bytes >= self.cfg.archive_batch_gb * 1_000_000_000
+        last_space = get_setting(conn, "notice_space_at")
+        if full and (not last_space or last_space < iso_in(-3)):
+            set_setting(conn, "notice_space_at", now_iso())
+            push.notify(self.cfg, "espaco", "Servidor ficando cheio",
+                        f"{server_bytes / 1e9:.0f} GB no servidor. Hora de transferir um lote para um HD.", "/")
+
+    def _backfill_medium(self, conn: sqlite3.Connection) -> None:
+        """Items from before medium previews existed: render them, 500 per round."""
+        from .ingest import enqueue
+        rows = conn.execute(
+            "SELECT i.id FROM items i JOIN files f ON f.item_id = i.id AND f.role = 'original' "
+            "WHERE i.medium_status = 'pending' AND i.kind IN ('photo', 'video') AND f.rel_path IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.item_id = i.id AND j.kind = 'thumbnail' "
+            "AND j.status IN ('pending', 'running')) LIMIT 500").fetchall()
+        for r in rows:
+            enqueue(conn, "thumbnail", r[0], priority=60)
+        # Archived before this version: the original is gone; the thumbnail is the best we have.
+        conn.execute("UPDATE items SET medium_status = 'none' WHERE medium_status = 'pending' AND state = 'archived' "
+                     "AND NOT EXISTS (SELECT 1 FROM files f WHERE f.item_id = items.id AND f.rel_path IS NOT NULL)")
 
     def _expire_uploads(self, conn: sqlite3.Connection) -> None:
         old = conn.execute(

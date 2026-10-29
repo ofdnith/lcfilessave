@@ -45,6 +45,7 @@ if Image is not None:
         pass
 
 THUMB_SIZE = 400
+MEDIUM_SIZE = 1024   # kept forever, also for archived items (~100 KB)
 PREVIEW_SIZE = 1600
 LARGE_VIDEO_BYTES = 300 * 1024 * 1024
 
@@ -478,6 +479,15 @@ def write_thumbnail(im: "Image.Image", dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".tmp")
     thumb.save(tmp, "WEBP", quality=72, method=4)
+    tmp.replace(dest)
+
+
+def write_medium(im: "Image.Image", dest: Path) -> None:
+    medium = _to_rgb(im.copy())
+    medium.thumbnail((MEDIUM_SIZE, MEDIUM_SIZE), Image.Resampling.LANCZOS)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    medium.save(tmp, "WEBP", quality=70, method=4)
     tmp.replace(dest)
 
 

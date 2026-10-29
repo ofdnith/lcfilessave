@@ -7,10 +7,10 @@ from contextlib import asynccontextmanager
 from importlib import resources
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from . import __version__, db, media
-from .api import archive, auth as auth_api, health, items, uploads
+from .api import albums, archive, auth as auth_api, health, items, migration, push as push_api, uploads
 from .config import CERTS_DIR, GEO_DIR, Config, load_config
 from .ingest import Ingestor, reconcile
 from .jobs import Worker
@@ -66,8 +66,24 @@ def create_app(cfg: Config) -> FastAPI:
     app.state.gazetteer = gazetteer
     app.state.reconcile_report = {}
 
-    for module in (health, auth_api, items, uploads, archive):
-        app.include_router(module.router)
+    for router in (health.router, auth_api.router, auth_api.tokens_router, items.router, albums.router,
+                   uploads.router, archive.router, push_api.router, migration.router):
+        app.include_router(router)
+
+    app.state.migration_active = None  # unknown until first checked
+
+    @app.middleware("http")
+    async def migration_guard(request: Request, call_next):
+        """While migrating to a new server, this one is read-only (consistent copy)."""
+        path = request.url.path
+        if (request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/")
+                and not path.startswith(("/api/auth/", "/api/migration/"))):
+            if app.state.migration_active is None:
+                app.state.migration_active = migration.migration_state(cfg)["active"]
+            if app.state.migration_active:
+                return JSONResponse({"detail": "Migração em andamento: este servidor está só para consulta."},
+                                    status_code=423)
+        return await call_next(request)
 
     @app.get("/ca.crt", include_in_schema=False)
     def ca_cert() -> FileResponse:

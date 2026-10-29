@@ -140,7 +140,7 @@ ITEM_COLUMNS = """
     i.captured_at, i.captured_tz, i.date_source, i.uploaded_at, i.source, i.state, i.important,
     i.volume_id, v.name AS volume_name, i.width, i.height, i.duration_ms, i.gps_lat, i.gps_lon,
     i.place, i.camera_make, i.camera_model, i.is_live_photo, i.is_screenshot, i.origin_app,
-    i.thumb_status, i.trashed_at,
+    i.thumb_status, i.medium_status, i.trashed_at,
     (SELECT f.rel_path IS NOT NULL FROM files f WHERE f.item_id = i.id AND f.role = 'original') AS on_server,
     EXISTS (SELECT 1 FROM files f WHERE f.item_id = i.id AND f.role = 'live-video') AS has_live_video
 """
@@ -180,6 +180,7 @@ def item_json(row: sqlite3.Row, cfg: Config) -> dict:
         "origin_app": row["origin_app"],
         "on_server": on_server,
         "thumb_url": f"/api/items/{iid}/thumb" if row["thumb_status"] == "ok" else None,
+        "medium_url": f"/api/items/{iid}/medium" if row["medium_status"] == "ok" else None,
         "preview_url": f"/api/items/{iid}/preview" if on_server else None,
         "original_url": f"/api/items/{iid}/original" if on_server else None,
         "live_video_url": f"/api/items/{iid}/original?role=live-video" if on_server and row["has_live_video"] else None,
@@ -190,6 +191,11 @@ def item_json(row: sqlite3.Row, cfg: Config) -> dict:
 
 def thumb_path(cfg: Config, sha256: str) -> Path:
     return cfg.subdir("miniaturas") / sha256[:2] / f"{sha256}.webp"
+
+
+def medium_path(cfg: Config, sha256: str) -> Path:
+    """Medium preview lives with the thumbnails: never deleted."""
+    return cfg.subdir("miniaturas") / sha256[:2] / f"{sha256}-1024.webp"
 
 
 def preview_path(cfg: Config, sha256: str) -> Path:

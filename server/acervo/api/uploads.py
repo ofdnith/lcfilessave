@@ -9,6 +9,7 @@ import json
 import os
 import secrets
 import sqlite3
+import threading
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -17,8 +18,8 @@ from pydantic import BaseModel, Field
 from python_multipart.multipart import MultipartParser, parse_options_header
 from starlette.concurrency import run_in_threadpool
 
-from .. import auth, db, media
-from ..catalog import now_iso, set_setting, transaction
+from .. import auth, db, media, push
+from ..catalog import get_setting, now_iso, set_setting, transaction
 from ..ingest import KNOWN_SQL, count_in_session, fingerprint_time, normalize_client_time, stored_safely, valid_session
 from ..storage import disk_usage
 
@@ -126,9 +127,39 @@ def finish_session(session_id: int, request: Request) -> dict:
                              (now_iso(), session_id))
             if row["source"] == "iphone-daily":
                 set_setting(conn, "last_daily_backup_at", now_iso())
-        return session_json(conn, _session(conn, session_id))
+        data = session_json(conn, _session(conn, session_id))
     finally:
         conn.close()
+    if row["source"] == "iphone-daily" and row["status"] == "open":
+        push.notify(request.app.state.config, "backup_concluido", "Backup diário", data["summary_text"], "/#/entrada")
+    return data
+
+
+@router.post("/daily/finish")
+def daily_finish(request: Request) -> dict:
+    """End of the daily backup Shortcut: closes today's session, returns the notification text."""
+    from datetime import date
+    cfg = request.app.state.config
+    conn = _conn(request)
+    try:
+        with transaction(conn):
+            day, _, sid = (get_setting(conn, "daily_session") or "").partition(":")
+            row = None
+            if day == date.today().isoformat() and sid.isdigit():
+                row = conn.execute("SELECT * FROM upload_sessions WHERE id = ?", (int(sid),)).fetchone()
+                if row is not None and row["status"] == "open":
+                    conn.execute("UPDATE upload_sessions SET status = 'finished', finished_at = ? WHERE id = ?",
+                                 (now_iso(), row["id"]))
+            set_setting(conn, "last_daily_backup_at", now_iso())
+        if row is None:
+            data = {"id": None, "source": "iphone-daily", "status": "finished", "new_count": 0,
+                    "existing_count": 0, "summary_text": "Backup diário: nada novo", "safe_to_delete": False}
+        else:
+            data = session_json(conn, _session(conn, row["id"]))
+    finally:
+        conn.close()
+    push.notify(cfg, "backup_concluido", "Backup diário", data["summary_text"], "/#/entrada")
+    return data
 
 
 # --- pre-check -------------------------------------------------------------------------------
@@ -185,9 +216,35 @@ def precheck(body: PrecheckBody, request: Request) -> dict:
 
 # --- ingest helper ---------------------------------------------------------------------------
 
+_daily_lock = threading.Lock()
+
+
+def daily_session(cfg) -> int:
+    """The iPhone daily backup can send files without managing sessions:
+    everything sent today with source=iphone-daily joins today's session."""
+    from datetime import date
+    today = date.today().isoformat()
+    with _daily_lock:
+        conn = db.connect(cfg.db_path)
+        try:
+            with transaction(conn):
+                saved = get_setting(conn, "daily_session") or ""
+                day, _, sid = saved.partition(":")
+                if day == today and sid.isdigit() and conn.execute(
+                        "SELECT 1 FROM upload_sessions WHERE id = ? AND status = 'open'", (int(sid),)).fetchone():
+                    return int(sid)
+                sid = conn.execute("INSERT INTO upload_sessions (source, client_label) VALUES ('iphone-daily', 'Backup diário')").lastrowid
+                set_setting(conn, "daily_session", f"{today}:{sid}")
+                return sid
+        finally:
+            conn.close()
+
+
 async def _ingest(request: Request, path: Path, *, filename: str, source: str, session_id: int | None,
                   client_modified: object, client_sha: str | None, client_key: str | None) -> dict:
     state = request.app.state
+    if source == "iphone-daily" and session_id is None:
+        session_id = await run_in_threadpool(daily_session, state.config)
     try:
         result = await run_in_threadpool(
             state.ingestor.ingest, path, filename=filename, source=source, session_id=session_id,
