@@ -15,7 +15,9 @@
     suggestionLabel,
   } from '../lib/format';
   import { findMountedVolume, guessRelPath, isNative, native } from '../lib/native';
-  import { toast } from '../lib/state.svelte';
+  import { app, toast } from '../lib/state.svelte';
+  import { pickAlbum } from '../lib/sheets.svelte';
+  import { href } from '../lib/router.svelte';
   import { closeViewer, viewer } from '../lib/viewer.svelte';
   import type { ItemDetail } from '../lib/types';
 
@@ -26,6 +28,15 @@
   let playingLive = $state(false);
   let imgLoaded = $state(false);
   let mountPath = $state<string | null>(null);
+  /** Load the full preview (instead of the medium WebP): after "Ver original" or a zoom. */
+  let showHd = $state(false);
+  let hdLoading = $state(false);
+  let videoOn = $state(false);
+  let zoomed = $state(false);
+  let origin = $state('50% 50%');
+  let albumsOf = $state<{ id: number; name: string }[]>([]);
+  /** Best quickly-loading image: the medium WebP, else the full preview (old items), else the thumb. */
+  const base = $derived(item ? (item.medium_url ?? (item.kind === 'photo' ? item.preview_url : null) ?? item.thumb_url) : null);
   let dialog = $state<HTMLElement | null>(null);
 
   $effect(() => {
@@ -36,11 +47,20 @@
       playingLive = false;
       imgLoaded = false;
       mountPath = null;
+      showHd = false;
+      hdLoading = false;
+      videoOn = false;
+      zoomed = false;
+      albumsOf = [];
     });
     let alive = true;
     api
       .item(it.id)
-      .then((d) => alive && (detail = d))
+      .then((d) => {
+        if (!alive) return;
+        detail = d;
+        albumsOf = d.albums ?? [];
+      })
       .catch(() => {});
     if (isNative() && it.volume && !it.on_server) {
       void findMountedVolume(it.volume.id).then((p) => alive && (mountPath = p));
@@ -48,7 +68,8 @@
     // Preload neighbours for snappy navigation.
     for (const n of [viewer.index + 1, viewer.index - 1]) {
       const nb = list?.items[n];
-      if (nb?.preview_url && nb.kind === 'photo') new Image().src = nb.preview_url;
+      const src = nb && (nb.kind === 'photo' || nb.kind === 'video') ? (nb.medium_url ?? (nb.kind === 'photo' ? nb.preview_url : null)) : null;
+      if (src) new Image().src = src;
     }
     if (list && viewer.index >= list.items.length - 5) void list.more();
     return () => {
@@ -67,6 +88,25 @@
     };
   });
 
+  function loadHd() {
+    if (!item?.preview_url || showHd) return;
+    showHd = true;
+    hdLoading = true;
+    const img = new Image();
+    img.onload = img.onerror = () => (hdLoading = false);
+    img.src = item.preview_url;
+  }
+
+  function toggleZoom(e: MouseEvent) {
+    if (item?.kind !== 'photo') return;
+    if (!zoomed) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      origin = `${((e.clientX - r.left) / r.width) * 100}% ${((e.clientY - r.top) / r.height) * 100}%`;
+      loadHd();
+    }
+    zoomed = !zoomed;
+  }
+
   function step(d: number) {
     if (!list) return;
     const n = viewer.index + d;
@@ -83,6 +123,10 @@
     else if (e.key === 'ArrowRight') step(1);
     else if (e.key === 'ArrowLeft') step(-1);
     else if (e.key === 'i') showInfo = !showInfo;
+    else if (e.key === 'z' && item.kind === 'photo') {
+      zoomed = !zoomed;
+      if (zoomed) loadHd();
+    }
     else return;
     e.preventDefault();
   }
@@ -93,7 +137,8 @@
   let dx = $state(0);
   let swiping = false;
   function ts(e: TouchEvent) {
-    if (e.touches.length !== 1) return;
+    if (e.touches.length === 2 && item?.kind === 'photo') loadHd();
+    if (e.touches.length !== 1 || zoomed) return;
     sx = e.touches[0].clientX;
     sy = e.touches[0].clientY;
     swiping = true;
@@ -137,6 +182,16 @@
     }
   }
 
+  function addToAlbum() {
+    if (!item) return;
+    const id = item.id;
+    pickAlbum([id], () => {
+      void api.item(id).then((d) => {
+        if (item?.id === id) albumsOf = d.albums ?? [];
+      });
+    });
+  }
+
   async function openOnDrive() {
     if (!item || !mountPath) return;
     const f = detail?.files.find((x) => x.role === 'original');
@@ -151,7 +206,7 @@
   const dims = $derived(item?.width && item?.height ? `${num(item.width)} × ${num(item.height)}` : null);
   const mp = $derived(item?.width && item?.height ? Math.round((item.width * item.height) / 1e5) / 10 : null);
   const onDriveOnly = $derived(!!item && !item.on_server && !!item.volume);
-  const canTrash = $derived(!!item && item.state !== 'archived' && item.state !== 'trash');
+  const canTrash = $derived(!!item && !app.readonly && item.state !== 'archived' && item.state !== 'trash');
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -181,6 +236,11 @@
         <button class="icon-btn" class:star={item.important} onclick={toggleImportant} aria-pressed={item.important} aria-label="Importante" title="Importante">
           <Icon name="star" fill={item.important} />
         </button>
+        {#if viewer.view !== 'trash'}
+          <button class="icon-btn" onclick={addToAlbum} aria-label="Adicionar ao álbum" title="Adicionar ao álbum">
+            <Icon name="albumAdd" />
+          </button>
+        {/if}
         {#if item.original_url}
           <a class="icon-btn" href={item.original_url} download={item.original_name} aria-label="Baixar original" title="Baixar original">
             <Icon name="download" />
@@ -207,14 +267,49 @@
         {#if playingLive && item.live_video_url}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video src={item.live_video_url} autoplay playsinline onended={() => (playingLive = false)}></video>
-        {:else if item.kind === 'video' && item.preview_url}
-          <!-- svelte-ignore a11y_media_has_caption -->
-          <video src={item.preview_url} controls playsinline preload="metadata" poster={item.thumb_url ?? undefined}></video>
-        {:else if item.kind === 'photo' && item.preview_url}
-          {#if item.thumb_url && !imgLoaded}
-            <img class="blur" src={item.thumb_url} alt="" aria-hidden="true" />
+        {:else if (item.kind === 'photo' || item.kind === 'video') && (base || item.preview_url)}
+          {#if item.kind === 'video' && videoOn && item.preview_url}
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video src={item.preview_url} controls autoplay playsinline poster={base ?? undefined}></video>
+          {:else}
+            <div
+              class="zoomable"
+              class:zoomed
+              class:still={item.kind !== 'photo'}
+              style:transform-origin={origin}
+              ondblclick={toggleZoom}
+              role="presentation"
+            >
+              {#if item.thumb_url && !imgLoaded}
+                <img class="blur" src={item.thumb_url} alt="" aria-hidden="true" />
+              {/if}
+              <img
+                class="full"
+                class:loaded={imgLoaded}
+                src={showHd && item.preview_url ? item.preview_url : (base ?? item.preview_url)}
+                alt={item.original_name}
+                onload={() => (imgLoaded = true)}
+              />
+              {#if showHd && hdLoading}<span class="hd-spin" aria-label="Carregando original"></span>{/if}
+            </div>
+            {#if item.kind === 'video'}
+              {#if item.preview_url}
+                <button class="play" onclick={() => (videoOn = true)} aria-label="Reproduzir vídeo">
+                  <Icon name="play" size={34} fill />
+                </button>
+              {/if}
+            {/if}
           {/if}
-          <img class="full" class:loaded={imgLoaded} src={item.preview_url} alt={item.original_name} onload={() => (imgLoaded = true)} />
+          {#if onDriveOnly || (item.kind === 'photo' && item.medium_url && item.preview_url && !showHd)}
+            <div class="under">
+              {#if onDriveOnly}
+                <span class="drive-note"><Icon name="drive" size={15} /> Original no {item.volume?.name}</span>
+                {#if mountPath}<button class="btn small" onclick={openOnDrive}>Abrir no {item.volume?.name}</button>{/if}
+              {:else}
+                <button class="btn small" onclick={loadHd}><Icon name="zoom" size={15} /> Ver original</button>
+              {/if}
+            </div>
+          {/if}
         {:else}
           <div class="doc">
             {#if item.thumb_url}
@@ -293,6 +388,12 @@
               {#each detail.files as f (f.id)}
                 <div class="faint">{f.role === 'live-video' ? 'Vídeo da Live Photo' : f.role === 'original' ? 'Original' : f.role} · {bytes(f.size_bytes)}</div>
               {/each}
+            </dd>
+          {/if}
+          {#if albumsOf.length}
+            <dt>Álbuns</dt>
+            <dd class="albums">
+              {#each albumsOf as a (a.id)}<a href={href('album', a.id)} onclick={closeViewer}>{a.name}</a>{/each}
             </dd>
           {/if}
           {#if detail?.suggestions.length}
@@ -381,7 +482,6 @@
     place-items: center;
     position: relative;
   }
-  .media > img,
   .media > video {
     grid-area: 1 / 1;
     max-width: 100%;
@@ -391,6 +491,103 @@
   .media > video {
     width: 100%;
     height: 100%;
+  }
+  .zoomable {
+    grid-area: 1 / 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    cursor: zoom-in;
+    transition: transform 0.22s var(--ease);
+  }
+  .zoomable > img {
+    grid-area: 1 / 1;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .zoomable.still {
+    cursor: default;
+  }
+  .zoomable.zoomed {
+    transform: scale(2.4);
+    cursor: zoom-out;
+  }
+  .play {
+    grid-area: 1 / 1;
+    z-index: 2;
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    padding-left: 5px;
+    background: rgba(10, 14, 19, 0.6);
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(6px);
+  }
+  .play:hover {
+    background: rgba(10, 14, 19, 0.8);
+  }
+  .under {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--sab) + 14px);
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 6px 6px 14px;
+    border-radius: 999px;
+    background: rgba(22, 29, 38, 0.88);
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+    z-index: 3;
+  }
+  .under:has(> .btn:only-child) {
+    padding-left: 6px;
+  }
+  .under .drive-note {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 13.5px;
+  }
+  .hd-spin {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .albums {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .albums a {
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--raised);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .albums a:hover {
+    background: var(--raised-2);
   }
   .full {
     opacity: 0;

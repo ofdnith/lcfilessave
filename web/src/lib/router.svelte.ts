@@ -1,24 +1,53 @@
 // Tiny hash router. Hash routing keeps the server simple: it only serves "/".
-export type Route = 'acervo' | 'entrada' | 'lixeira' | 'enviar' | 'ajustes' | 'dispositivos' | 'esvaziar';
+// Shapes: #/route, #/route/param, #/route?key=value
+export type Route =
+  | 'acervo'
+  | 'entrada'
+  | 'lixeira'
+  | 'enviar'
+  | 'ajustes'
+  | 'dispositivos'
+  | 'esvaziar'
+  | 'albuns'
+  | 'album'
+  | 'lugares';
 
-const routes: Route[] = ['acervo', 'entrada', 'lixeira', 'enviar', 'ajustes', 'dispositivos', 'esvaziar'];
+const routes: Route[] = ['acervo', 'entrada', 'lixeira', 'enviar', 'ajustes', 'dispositivos', 'esvaziar', 'albuns', 'album', 'lugares'];
 
-function parse(): Route {
-  const h = location.hash.replace(/^#\/?/, '').split(/[?/]/)[0] as Route;
-  return routes.includes(h) ? h : 'acervo';
+interface Parsed {
+  route: Route;
+  param: string | null;
+  query: Record<string, string>;
 }
 
-export const router = $state({ route: parse() });
+function parse(): Parsed {
+  const raw = location.hash.replace(/^#\/?/, '');
+  const [path, search = ''] = raw.split('?');
+  const [head, param] = path.split('/');
+  const route = (routes.includes(head as Route) ? head : 'acervo') as Route;
+  const query: Record<string, string> = {};
+  new URLSearchParams(search).forEach((v, k) => (query[k] = v));
+  return { route, param: param ? decodeURIComponent(param) : null, query };
+}
+
+export const router = $state(parse());
 
 window.addEventListener('hashchange', () => {
-  router.route = parse();
+  const p = parse();
+  router.route = p.route;
+  router.param = p.param;
+  router.query = p.query;
 });
 
-export function go(route: Route): void {
-  if (router.route === route && location.hash) return;
-  location.hash = `#/${route}`;
+export function href(route: Route, param?: string | number | null, query?: Record<string, string>): string {
+  let h = `#/${route}`;
+  if (param !== undefined && param !== null) h += `/${encodeURIComponent(String(param))}`;
+  if (query && Object.keys(query).length) h += `?${new URLSearchParams(query).toString()}`;
+  return h;
 }
 
-export function href(route: Route): string {
-  return `#/${route}`;
+export function go(route: Route, param?: string | number | null, query?: Record<string, string>): void {
+  const h = href(route, param, query);
+  if (location.hash === h) return;
+  location.hash = h;
 }

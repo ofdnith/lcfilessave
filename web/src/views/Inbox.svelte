@@ -9,6 +9,12 @@
   import SelectionBar from '../components/SelectionBar.svelte';
   import Suggestions from '../components/Suggestions.svelte';
   import { runAction } from '../lib/actions';
+  import { api, ApiError } from '../lib/api';
+  import { refreshStats } from '../lib/stats.svelte';
+  import { confirmSheet, pickAlbum } from '../lib/sheets.svelte';
+  import { invalidate, toast } from '../lib/state.svelte';
+  import { plural } from '../lib/format';
+  import type { InboxSummary } from '../lib/types';
   import { href } from '../lib/router.svelte';
   import { num } from '../lib/format';
   import { ItemList } from '../lib/itemlist.svelte';
@@ -32,6 +38,44 @@
   });
   const layout = $derived(app.kind === 'document' || app.kind === 'audio' || app.kind === 'other' ? 'list' : 'grid');
   const count = $derived(app.stats?.inbox_count ?? list.total);
+  let summary = $state<InboxSummary | null>(null);
+  let keeping = $state(false);
+
+  $effect(() => {
+    void app.revision;
+    void app.stats?.inbox_count;
+    api
+      .inboxSummary()
+      .then((s) => (summary = s))
+      .catch(() => (summary = null));
+  });
+
+  async function keepClean() {
+    const s = summary;
+    if (!s || !s.clean || keeping) return;
+    const ok = await confirmSheet({
+      title: `Manter ${plural(s.clean, 'item', 'itens')} no Acervo?`,
+      body: s.flagged
+        ? `${s.flagged === 1 ? 'O 1 sinalizado continua' : `Os ${num(s.flagged)} sinalizados continuam`} na Entrada para você decidir.`
+        : 'Nenhum item está em sugestões; a Entrada fica vazia.',
+      confirm: `Manter ${num(s.clean)}`,
+    });
+    if (!ok) return;
+    keeping = true;
+    try {
+      const r = await api.keepClean();
+      toast(
+        `${plural(r.kept, 'item mantido', 'itens mantidos')}${r.flagged_left ? ` · ${plural(r.flagged_left, 'sinalizado continua', 'sinalizados continuam')} na Entrada` : ''}`,
+        'ok',
+      );
+      await refreshStats();
+      invalidate();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Não foi possível manter.', 'error');
+    } finally {
+      keeping = false;
+    }
+  }
 
   $effect(() => {
     void app.revision;
@@ -82,6 +126,12 @@
       <span class="label">{count === 1 ? 'item aguardando triagem' : 'itens aguardando triagem'}</span>
     </div>
     <div class="hero-actions">
+      {#if summary && summary.clean > 0}
+        <button class="btn keep-all" onclick={keepClean} disabled={keeping}>
+          <Icon name="check" size={17} />
+          {summary.flagged ? `Manter tudo, menos as sugestões (${num(summary.clean)})` : `Manter tudo (${num(summary.clean)})`}
+        </button>
+      {/if}
       <button class="btn primary" onclick={startQuick} disabled={!count}><Icon name="zap" size={17} /> Modo rápido</button>
       <button class="btn" onclick={() => (selecting ? stopSelecting() : (selecting = true))} aria-pressed={selecting} disabled={!list.items.length}>
         <Icon name="select" size={17} /> {selecting ? 'Cancelar seleção' : 'Selecionar'}
@@ -114,7 +164,10 @@
 {#if selecting}
   <SelectionBar count={selection.size} onclear={stopSelecting}>
     <button class="btn small keep" disabled={!selection.size} onclick={() => batch('keep')}><Icon name="check" size={15} /> Manter</button>
-    <button class="btn small danger" disabled={!selection.size} onclick={() => batch('discard')}><Icon name="trash" size={15} /> Descartar</button>
+    {#if !app.readonly}
+      <button class="btn small danger" disabled={!selection.size} onclick={() => batch('discard')}><Icon name="trash" size={15} /> Descartar</button>
+    {/if}
+    <button class="btn small" disabled={!selection.size} onclick={() => pickAlbum([...selection], stopSelecting)} aria-label="Adicionar ao álbum"><Icon name="albumAdd" size={15} /></button>
     <button class="btn small" disabled={!selection.size} onclick={() => batch('important')} aria-label="Marcar como importante"><Icon name="star" size={15} /><span class="hide-sm">Importante</span></button>
   </SelectionBar>
 {/if}
@@ -149,6 +202,14 @@
     font-size: 19px;
     color: var(--text);
     font-weight: 500;
+  }
+  .keep-all {
+    background: var(--keep-soft);
+    color: var(--keep);
+    border-color: rgba(107, 212, 155, 0.35);
+  }
+  .keep-all:hover {
+    background: rgba(107, 212, 155, 0.22);
   }
   .hero-actions {
     display: flex;

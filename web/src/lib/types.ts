@@ -40,6 +40,8 @@ export interface Item {
   preview_url: string | null;
   original_url: string | null;
   live_video_url: string | null;
+  /** WebP ≤1024 px kept forever, even after the original goes to a drive (v0.2). */
+  medium_url?: string | null;
   trashed_at: string | null;
   trash_expires_at: string | null;
 }
@@ -58,6 +60,7 @@ export interface ItemFile {
 export interface ItemDetail extends Item {
   files: ItemFile[];
   suggestions: { id: number; kind: SuggestionKind }[];
+  albums?: { id: number; name: string }[];
 }
 
 export interface ItemsPage {
@@ -220,10 +223,52 @@ export interface Health {
     alert: boolean;
   };
   problems: string[];
+  migration?: { active: boolean; started_at: string | null };
 }
 
 export interface AuthStatus {
   password_set: boolean;
   authenticated: boolean;
   method: 'cookie' | 'token' | 'local' | null;
+  remote?: boolean;
+  readonly?: boolean;
 }
+
+export interface InboxSummary {
+  total: number;
+  flagged: number;
+  clean: number;
+}
+
+export interface MemoryYear {
+  year: number;
+  years_ago: number;
+  count: number;
+  items: Item[];
+}
+
+export interface Place {
+  place: string;
+  count: number;
+  lat: number;
+  lon: number;
+  cover: Item | null;
+}
+
+export interface Album {
+  id: number;
+  name: string;
+  count: number;
+  cover: Item | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiToken {
+  id: number;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export type PushTopic = 'backup_atrasado' | 'espaco' | 'hd_problema' | 'backup_concluido';

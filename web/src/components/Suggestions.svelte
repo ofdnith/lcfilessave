@@ -121,7 +121,9 @@
                 {#if sel.length}
                   <span class="muted num">{plural(sel.length, 'selecionado', 'selecionados')}</span>
                   <button class="btn small keep" onclick={() => apply(s, 'keep', sel)}><Icon name="check" size={15} /> Manter</button>
-                  <button class="btn small danger" onclick={() => apply(s, 'discard', sel)}><Icon name="trash" size={15} /> Descartar</button>
+                  {#if !app.readonly}
+                    <button class="btn small danger" onclick={() => apply(s, 'discard', sel)}><Icon name="trash" size={15} /> Descartar</button>
+                  {/if}
                   <button class="btn small" onclick={() => apply(s, 'important', sel)}><Icon name="star" size={15} /> Importante</button>
                 {:else}
                   <button class="btn small keep" onclick={() => apply(s, 'keep', s.items.map((i) => i.id))}>Manter todos</button>

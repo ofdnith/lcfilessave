@@ -12,6 +12,11 @@
   import EmptyIphone from './views/EmptyIphone.svelte';
   import Login from './views/Login.svelte';
   import StorageStatus from './components/StorageStatus.svelte';
+  import ConfirmSheet from './components/ConfirmSheet.svelte';
+  import AlbumSheet from './components/AlbumSheet.svelte';
+  import Albums from './views/Albums.svelte';
+  import AlbumPage from './views/AlbumPage.svelte';
+  import Places from './views/Places.svelte';
   import { api, ApiError } from './lib/api';
   import { isNative } from './lib/native';
   import { go, router } from './lib/router.svelte';
@@ -22,6 +27,8 @@
   async function checkAuth() {
     try {
       const s = await api.authStatus();
+      app.remote = !!s.remote;
+      app.readonly = !!s.readonly;
       app.auth = s.password_set && !s.authenticated ? 'login' : 'ok';
       if (app.auth === 'ok') void refreshStats();
     } catch (e) {
@@ -40,6 +47,21 @@
       clearInterval(t);
       document.removeEventListener('visibilitychange', onVis);
     };
+  });
+
+  // Migration state lives in /api/health; check it on load and every 30 s.
+  async function checkHealth() {
+    try {
+      app.migration = !!(await api.health()).migration?.active;
+    } catch {
+      /* the offline screen covers a dead server */
+    }
+  }
+  $effect(() => {
+    if (app.auth !== 'ok') return;
+    void checkHealth();
+    const t = setInterval(() => document.visibilityState === 'visible' && void checkHealth(), 30000);
+    return () => clearInterval(t);
   });
 
   // Mac-only routes are hidden elsewhere.
@@ -120,6 +142,16 @@
 {:else}
   <Nav />
   <main class="main">
+    {#if app.migration}
+      <div class="banner danger top-banner" role="status">
+        <Icon name="lock" size={18} /> Migração em andamento — o Acervo está só para consulta
+      </div>
+    {/if}
+    {#if app.readonly}
+      <div class="slim" role="status">
+        <Icon name="shield" size={15} /> Fora de casa · modo seguro (não dá para apagar nem mexer em HDs)
+      </div>
+    {/if}
     {#if overdue}
       <div class="banner top-banner" role="status"><Icon name="alert" size={18} /> Backup diário atrasado: mais de 48 h</div>
     {/if}
@@ -143,15 +175,23 @@
       <Devices />
     {:else if router.route === 'esvaziar'}
       <EmptyIphone />
+    {:else if router.route === 'albuns'}
+      <Albums />
+    {:else if router.route === 'album'}
+      {#key router.param}<AlbumPage id={Number(router.param)} />{/key}
+    {:else if router.route === 'lugares'}
+      <Places />
     {/if}
   </main>
   <Viewer />
+  <AlbumSheet />
   {#if dragDepth > 0 && router.route !== 'enviar'}
     <div class="dropzone" aria-hidden="true">
       <div><Icon name="upload" size={40} /><p>Solte para enviar ao Acervo</p></div>
     </div>
   {/if}
 {/if}
+<ConfirmSheet />
 <Toasts />
 
 <style>
@@ -165,6 +205,21 @@
   }
   .top-banner + .top-banner {
     margin-top: 8px;
+  }
+  .slim {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: calc(var(--sat) + 6px) 16px 6px;
+    background: rgba(143, 185, 255, 0.12);
+    color: var(--info);
+    font-size: 12.5px;
+    font-weight: 560;
+    text-align: center;
+  }
+  .slim + .top-banner {
+    margin-top: 10px;
   }
   .mobile-status {
     display: none;

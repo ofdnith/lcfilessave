@@ -259,14 +259,21 @@
       display: none;
     }
   }
+  /* Full-bleed on phones: the section itself bleeds, because content-visibility
+     clips anything a child draws outside the section box. */
   @media (max-width: 899px) {
+    .month {
+      margin: 0 -16px 18px;
+    }
+    .month-head {
+      padding: 6px 16px;
+    }
     .grid {
       grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
       gap: 2px;
-      margin: 0 -16px;
     }
-    .month-head {
-      padding: 6px 0;
+    .rows {
+      padding: 0 10px;
     }
   }
 

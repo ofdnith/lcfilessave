@@ -13,19 +13,32 @@
     icon: IconName;
     badge?: number;
     mobile: boolean;
+    /** Routes that light this entry up as well. */
+    also?: Route[];
   }
 
   const native = isNative();
+  // Phone bar stays at 5 entries; Lugares lives in the Acervo header and Lixeira in Ajustes there.
   const items = $derived<NavItem[]>([
     { route: 'acervo', label: 'Acervo', icon: 'library', mobile: true },
+    { route: 'lugares', label: 'Lugares', icon: 'map', mobile: false },
+    { route: 'albuns', label: 'Álbuns', icon: 'album', mobile: true, also: ['album'] },
     { route: 'entrada', label: 'Entrada', icon: 'inbox', badge: app.stats?.inbox_count, mobile: true },
     { route: 'enviar', label: 'Enviar', icon: 'upload', mobile: true },
-    { route: 'lixeira', label: 'Lixeira', icon: 'trash', mobile: true },
-    ...(native ? [{ route: 'dispositivos' as Route, label: 'Dispositivos', icon: 'drive' as IconName, mobile: false }] : []),
+    { route: 'lixeira', label: 'Lixeira', icon: 'trash', mobile: false },
+    ...(native ? [{ route: 'dispositivos' as Route, label: 'Dispositivos', icon: 'drive' as IconName, mobile: false, also: ['esvaziar' as Route] }] : []),
     { route: 'ajustes', label: 'Ajustes', icon: 'settings', mobile: true },
   ]);
+  // On the phone, screens without their own tab light up their parent.
+  const mobileParent: Partial<Record<Route, Route>> = {
+    lugares: 'acervo',
+    lixeira: 'ajustes',
+    dispositivos: 'ajustes',
+    esvaziar: 'ajustes',
+  };
 
-  const active = (r: Route) => router.route === r || (r === 'dispositivos' && router.route === 'esvaziar');
+  const active = (it: NavItem) => router.route === it.route || !!it.also?.includes(router.route);
+  const activeMobile = (it: NavItem) => active(it) || mobileParent[router.route] === it.route;
   const uploading = $derived(uploader.running);
 </script>
 
@@ -37,7 +50,7 @@
   <ul>
     {#each items as it (it.route)}
       <li>
-        <a href={href(it.route)} class:active={active(it.route)} aria-current={active(it.route) ? 'page' : undefined}>
+        <a href={href(it.route)} class:active={active(it)} aria-current={active(it) ? 'page' : undefined}>
           <Icon name={it.icon} size={20} />
           <span class="lbl">{it.label}</span>
           {#if it.route === 'enviar' && uploading}<span class="pulse" aria-label="Enviando"></span>{/if}
@@ -53,7 +66,7 @@
 
 <nav class="tabbar" aria-label="Principal">
   {#each items.filter((i) => i.mobile) as it (it.route)}
-    <a href={href(it.route)} class:active={active(it.route)} aria-current={active(it.route) ? 'page' : undefined}>
+    <a href={href(it.route)} class:active={activeMobile(it)} aria-current={activeMobile(it) ? 'page' : undefined}>
       <span class="ti">
         <Icon name={it.icon} size={23} />
         {#if it.badge}<span class="tbadge num">{it.badge > 999 ? '999+' : num(it.badge)}</span>{/if}

@@ -1,6 +1,8 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import StorageStatus from '../components/StorageStatus.svelte';
+  import IphoneSetup from '../components/IphoneSetup.svelte';
+  import PushSettings from '../components/PushSettings.svelte';
   import { api } from '../lib/api';
   import { bytes, num } from '../lib/format';
   import { isNative } from '../lib/native';
@@ -52,6 +54,22 @@
       </dl>
     {/if}
   </section>
+
+  <nav class="shortcuts" aria-label="Atalhos">
+    <a class="sc" href={href('lixeira')}>
+      <Icon name="trash" size={19} /><span>Lixeira</span>
+      {#if st?.trash_count}<span class="faint num">{num(st.trash_count)}</span>{/if}
+      <Icon name="right" size={16} />
+    </a>
+    <a class="sc" href={href('lugares')}>
+      <Icon name="map" size={19} /><span>Lugares</span><Icon name="right" size={16} />
+    </a>
+  </nav>
+
+  {#if !isNative()}
+    <IphoneSetup />
+    <PushSettings />
+  {/if}
 
   {#if isNative()}
     <section class="panel">
@@ -116,6 +134,37 @@
   .panel p {
     margin: 0 0 12px;
     font-size: 14px;
+  }
+  .shortcuts {
+    display: none;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+  .sc {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 16px;
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 560;
+  }
+  .sc + .sc {
+    border-top: 1px solid var(--line-soft);
+  }
+  .sc span:first-of-type {
+    flex: 1;
+  }
+  .sc :global(svg:last-child) {
+    color: var(--faint);
+  }
+  @media (max-width: 899px) {
+    .shortcuts {
+      display: flex;
+    }
   }
   .grid {
     display: grid;
