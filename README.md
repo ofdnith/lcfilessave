@@ -5,6 +5,10 @@ celular Android antigo (Realme 9) dentro de casa. O celular **recebe, organiza e
 guarda temporariamente**; HDs externos numerados são o arquivo definitivo. O
 catálogo continua navegável e buscável mesmo depois que os originais vão para o HD.
 
+Caminho de um arquivo: **Entrada** na memória interna (até 100 GB) → triagem →
+**Acervo no cartão microSD** (cópia conferida por SHA-256, para sobreviver à perda
+do celular) → **HD**, em lotes, quando o cartão enche. Veja [docs/realme.md](docs/realme.md#6-cartão-microsd--onde-fica-o-que-já-foi-triado).
+
 ```
  iPhone (web app + Atalhos) ─┐                         ┌─ HD VOLUME-001 (exFAT)
                              ├─► Realme (servidor) ◄───┤  originais + ABRIR-ACERVO.html
@@ -67,7 +71,7 @@ Sem senha definida, o servidor só aceita este computador.
 ### Testes
 
 ```bash
-scripts/test.sh            # servidor: 120 testes
+scripts/test.sh            # servidor: 142 testes
 cd web && npm run check    # interface: verificação de tipos
 cd mac/src-tauri && cargo test
 ```
@@ -81,7 +85,11 @@ deles podiam apagar a única cópia de uma foto); todos foram corrigidos e cada 
 virou um teste em `server/tests/test_review_regressions.py`.
 
 Medido aqui: 500 fotos enviadas em ~6 s, miniaturas em ~22 s (no Realme, espere
-uns 3–5× mais), triagem de 500 itens em 0,4 s, busca em ~10 ms.
+uns 3–5× mais), triagem de 500 itens em 0,4 s, busca em ~10 ms, procura de
+quase-duplicados entre 100 mil fotos em 0,15 ms (com `numpy`; 8 ms sem).
+
+Pensado para o Snapdragon 680: as tarefas de fundo pausam com a bateria a 40 °C,
+o OCR lê uma cópia de 1600 px com um núcleo, e os pHash ficam em memória.
 
 ## Regras invioláveis — onde cada uma é garantida
 
@@ -122,4 +130,9 @@ acervo-dados/
 ├── certificados/  HTTPS próprio
 ├── tmp/           uploads em andamento
 └── catalogo.db
+
+cartão microSD (sd_dir)
+├── acervo/        AAAA/MM/… — o que já passou pela triagem
+├── lixeira/       descartes de itens que estavam no cartão
+└── acervo-resgate/ cópia diária do catálogo + LEIA-ME.txt
 ```

@@ -89,18 +89,62 @@ instalação, rode de novo o instalador ou acrescente o nome em `tls_names` no
 `~/acervo/acervo.toml`, rode `~/acervo/server/.venv/bin/acervo --config ~/acervo/acervo.toml certificado`
 e `acervo-ctl restart`. O certificado da autoridade (o que você instalou no iPhone) não muda.
 
-## 6. Cartão microSD (opcional)
+## 6. Cartão microSD — onde fica o que já foi triado
 
-Com um cartão, o Acervo pode guardar ali o que já foi triado quando a memória
-interna passar do alerta (80%). No Android o Termux só escreve numa pasta própria do cartão:
+O caminho de cada arquivo:
+
+```
+iPhone/Mac ──► Entrada (memória interna, até 100 GB) ──triagem──► Acervo (cartão microSD) ──lote──► HD
+```
+
+- **Entrada** fica na memória interna, que é rápida. Passou de `inbox_max_gb`
+  (100 GB), o servidor recusa novos envios até você fazer a triagem.
+- **Manter** é instantâneo. Logo depois, uma tarefa de fundo copia o item para
+  o cartão, relê a cópia, confere o SHA-256 e só então apaga a interna.
+  `acervo-ctl status` mostra quanto ainda está copiando.
+- Quando o cartão passa de 80%, a barra de espaço avisa: é hora de passar um
+  lote para o HD pelo app do Mac. O lote sai do cartão e libera espaço.
+- Se o cartão estiver cheio ou fora do celular, o que você mantiver fica na
+  memória interna e vai para o cartão sozinho quando houver espaço.
+
+**Se o celular se perder**, o cartão tem tudo o que já passou pela triagem e
+ainda não foi para um HD, em pastas comuns (`acervo/AAAA/MM/fotos`…), mais uma
+cópia diária do catálogo e um `LEIA-ME.txt` em `acervo-resgate/`. O que ainda
+estava na Entrada (sem triagem) estava só no celular.
+
+### Antes de usar
+
+- Cartão **de marca** (SanDisk, Samsung, Kingston), classe **A1/A2, U3**. O Realme 9
+  aceita até 256 GB. Cartões falsificados mentem o tamanho e corrompem arquivos.
+- Configure como **armazenamento portátil** (exFAT). **Nunca** use "formatar como
+  memória interna": o cartão fica criptografado e ilegível em qualquer outro aparelho,
+  o que acaba com a ideia de resgate.
+- O cartão é **uma cópia só**. Mande lotes para o HD com frequência; não espere encher.
+
+### Ligar
+
+O `instalar.sh` pergunta se deve usar o cartão e configura tudo. Para fazer à mão:
 
 1. Rode `termux-setup-storage`.
-2. Descubra o caminho: `ls ~/storage/` → use `~/storage/external-1` (que aponta para
+2. Descubra o caminho: `readlink -f ~/storage/external-1` (algo como
    `/storage/XXXX-XXXX/Android/data/com.termux/files`).
-3. No `~/acervo/acervo.toml`, acrescente `sd_dir = "/storage/XXXX-XXXX/Android/data/com.termux/files/acervo"`.
-4. `acervo-ctl restart`.
+3. No `~/acervo/acervo.toml`, acrescente:
+   ```toml
+   sd_dir = "/storage/XXXX-XXXX/Android/data/com.termux/files/acervo"
+   sd_for_library = true
+   ```
+4. `acervo-ctl restart`. O que já estava no Acervo começa a ir para o cartão.
 
-Atenção: essa pasta também é apagada se o Termux for desinstalado.
+Atenção: o Android apaga essa pasta do cartão se o Termux for desinstalado
+(mais um motivo para nunca desinstalar).
+
+## 7. Temperatura
+
+O celular vive na tomada, e OCR e miniaturas esquentam o processador. Com a
+bateria a 40 °C (`max_temp_c`), as tarefas de fundo pausam e voltam quando ela
+esfria 3 °C. Envios e triagem continuam funcionando durante a pausa.
+`acervo-ctl status` mostra a temperatura. Deixe o celular em lugar ventilado, fora
+de capinha.
 
 ## O que roda no celular
 
@@ -109,6 +153,7 @@ Atenção: essa pasta também é apagada se o Termux for desinstalado.
 | Python 3, FastAPI, uvicorn | `python` + `pip` |
 | pydantic-core | `python-pydantic-core` ou compilado com `rust` |
 | Pillow, cryptography | `python-pillow`, `python-cryptography` |
+| numpy (opcional, quase-duplicados rápidos) | `python-numpy` |
 | exiftool, ffmpeg, pdftotext, tesseract | `exiftool`, `ffmpeg`, `poppler`, `tesseract` |
 | bateria / Wi-Fi | `termux-api` (+ app Termux:API) |
 | Interface (compilada uma vez) | `nodejs-lts` |

@@ -500,6 +500,15 @@ def write_preview(im: "Image.Image", dest: Path) -> None:
     tmp.replace(dest)
 
 
+def write_ocr_image(im: "Image.Image", dest: Path) -> None:
+    """Grayscale PNG, at most PREVIEW_SIZE on the long side, for tesseract.
+    Lossless, so letters keep sharp edges; grayscale is what tesseract reads anyway."""
+    img = _to_rgb(im.copy()).convert("L")
+    img.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE), Image.Resampling.LANCZOS)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, "PNG", compress_level=1)
+
+
 _DCT_N = 32
 _DCT_COS = [[math.cos((2 * x + 1) * u * math.pi / (2 * _DCT_N)) for x in range(_DCT_N)]
             for u in range(8)]

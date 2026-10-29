@@ -1,14 +1,61 @@
-"""Is the device plugged in? Heavy work (OCR) only runs while charging."""
+"""Is the device plugged in, and is it too hot to keep working?
+
+Heavy work (OCR) only runs while charging. On the phone, which lives on the
+charger, that is almost always — so background jobs also pause when the
+battery gets hot (ThermalGate), to spare the battery and the SoC.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
+log = logging.getLogger(__name__)
+
 _cache: tuple[float, bool, dict] | None = None
+
+# Resume only after cooling this many degrees below the limit, so the worker
+# does not flip on and off around the threshold.
+COOL_DOWN_MARGIN = 3.0
+
+
+class ThermalGate:
+    """Pauses background work while the battery is at or above `max_temp_c`.
+
+    Battery temperature is what Termux:API reports and what matters for battery
+    swelling. Unknown temperature (Mac, no Termux:API) never pauses anything.
+    """
+
+    def __init__(self, max_temp_c: float, read=None) -> None:
+        self.max_temp_c = max_temp_c
+        self._read = read or (lambda: battery().get("temperature"))
+        self.paused = False
+        self.temperature: float | None = None
+
+    def too_hot(self) -> bool:
+        try:
+            temp = self._read()
+        except Exception:  # a broken sensor must not stop the worker forever
+            temp = None
+        self.temperature = float(temp) if isinstance(temp, (int, float)) else None
+        if self.temperature is None:
+            self.paused = False
+        elif self.paused:
+            if self.temperature <= self.max_temp_c - COOL_DOWN_MARGIN:
+                self.paused = False
+                log.info("Temperatura em %.1f °C: tarefas retomadas", self.temperature)
+        elif self.temperature >= self.max_temp_c:
+            self.paused = True
+            log.info("Temperatura em %.1f °C (limite %s °C): tarefas pausadas até esfriar",
+                     self.temperature, self.max_temp_c)
+        return self.paused
+
+    def status(self) -> dict:
+        return {"temperature": self.temperature, "max_temp_c": self.max_temp_c, "paused": self.paused}
 
 
 def battery() -> dict:

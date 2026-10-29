@@ -24,6 +24,9 @@ pkg update -y >/dev/null
 pkg install -y python git exiftool ffmpeg poppler tesseract nodejs-lts termux-api \
   python-pillow python-cryptography libheif openssl curl >/dev/null
 ok "python, exiftool, ffmpeg, poppler, tesseract, node"
+# numpy speeds up near-duplicate search; optional, the server works without it.
+pkg install -y python-numpy >/dev/null 2>&1 && ok "numpy (quase-duplicados rápidos)" \
+  || warn "python-numpy não instalou; quase-duplicados usam Python puro. Tudo bem."
 
 say "2/9 pydantic-core (base do FastAPI)"
 if python -c "import pydantic_core" 2>/dev/null; then
@@ -67,11 +70,28 @@ TS_NAME=""
 echo "  Dica: no painel do Tailscale (login.tailscale.com → Machines), renomeie este celular para 'acervo'."
 echo "  Assim o endereço é sempre acervo.<sua-rede>.ts.net, mesmo se um dia o servidor mudar de aparelho."
 read -r -p "  Nome do Tailscale deste celular (ex.: acervo.tail1234.ts.net) — Enter para pular: " TS_NAME || true
-BACKUP_DIR=""
-if ask "Guardar uma cópia diária do catálogo na memória compartilhada (recomendado)?"; then
+STORAGE_OK=""
+storage_access() {
+  [[ -n "$STORAGE_OK" ]] && return
   termux-setup-storage || true
   sleep 3
+  STORAGE_OK=1
+}
+BACKUP_DIR=""
+if ask "Guardar uma cópia diária do catálogo na memória compartilhada (recomendado)?"; then
+  storage_access
   BACKUP_DIR="$HOME/storage/shared/Acervo-copia-do-catalogo"
+fi
+SD_DIR=""
+if ask "Usar o cartão microSD para guardar tudo o que passar pela triagem (recomendado se houver cartão)?"; then
+  storage_access
+  if [[ -d "$HOME/storage/external-1" ]]; then
+    SD_DIR="$(readlink -f "$HOME/storage/external-1")/acervo"
+    mkdir -p "$SD_DIR" && ok "cartão: $SD_DIR"
+    warn "O cartão precisa estar como ARMAZENAMENTO PORTÁTIL (exFAT), nunca formatado como memória interna."
+  else
+    warn "Cartão não encontrado (~/storage/external-1). Coloque o cartão e rode o instalador de novo."
+  fi
 fi
 if [[ ! -f "$CONF" ]]; then
   {
@@ -83,6 +103,12 @@ if [[ ! -f "$CONF" ]]; then
     echo "https = true"
     echo -n "tls_names = [\"$IP\""; [[ -n "$TS_NAME" ]] && echo -n ", \"$TS_NAME\""; echo "]"
     [[ -n "$BACKUP_DIR" ]] && echo "catalog_backup_dir = \"$BACKUP_DIR\""
+    if [[ -n "$SD_DIR" ]]; then
+      echo "sd_dir = \"$SD_DIR\""
+      echo "sd_for_library = true"
+    fi
+    echo "inbox_max_gb = 100"
+    echo "max_temp_c = 40"
     echo "storage_alert_pct = 80"
     echo "archive_batch_gb = 80"
     echo "archive_copies = 1"

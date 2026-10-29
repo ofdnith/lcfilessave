@@ -19,7 +19,7 @@ from python_multipart.multipart import MultipartParser, parse_options_header
 from starlette.concurrency import run_in_threadpool
 
 from .. import auth, db, media, push
-from ..catalog import get_setting, now_iso, set_setting, transaction
+from ..catalog import get_setting, inbox_bytes, now_iso, set_setting, transaction
 from ..ingest import KNOWN_SQL, count_in_session, fingerprint_time, normalize_client_time, stored_safely, valid_session
 from ..storage import disk_usage
 
@@ -40,8 +40,18 @@ def _uploads_dir(request: Request) -> Path:
 
 
 def _check_space(request: Request, length: int) -> None:
-    if disk_usage(request.app.state.config.data_dir).free_bytes < length + SPACE_MARGIN:
+    cfg = request.app.state.config
+    if disk_usage(cfg.data_dir).free_bytes < length + SPACE_MARGIN:
         raise HTTPException(507, "Sem espaço no servidor. Transfira um lote para um HD.")
+    if cfg.inbox_max_gb:
+        conn = _conn(request)
+        try:
+            used = inbox_bytes(conn)
+        finally:
+            conn.close()
+        if used + length > cfg.inbox_max_gb * 1_000_000_000:
+            raise HTTPException(507, f"A Entrada chegou ao limite de {cfg.inbox_max_gb} GB. "
+                                     "Faça a triagem para liberar espaço.")
 
 
 # --- sessions ------------------------------------------------------------------------------
