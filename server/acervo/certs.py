@@ -52,6 +52,7 @@ def generate(cert_dir: Path, names: list[str]) -> Path:
                    .public_key(ca_key.public_key()).serial_number(x509.random_serial_number())
                    .not_valid_before(now - dt.timedelta(days=1)).not_valid_after(now + dt.timedelta(days=3650))
                    .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+                   .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
                    .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
                                                 content_commitment=False, key_encipherment=False,
                                                 data_encipherment=False, key_agreement=False,
@@ -75,6 +76,12 @@ def generate(cert_dir: Path, names: list[str]) -> Path:
             .add_extension(x509.SubjectAlternativeName(sans), critical=False)
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
             .add_extension(x509.ExtendedKeyUsage([EKU.SERVER_AUTH]), critical=False)
+            .add_extension(x509.KeyUsage(digital_signature=True, key_encipherment=False, content_commitment=False,
+                                         data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                                         crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+            # Strict TLS clients (Python 3.13+, recent Apple systems) require these identifiers.
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_cert.public_key()), critical=False)
             .sign(ca_key, hashes.SHA256()))
     _write_key(cert_dir / "server.key", key, serialization)
     (cert_dir / "server.crt").write_bytes(cert.public_bytes(serialization.Encoding.PEM))

@@ -71,7 +71,12 @@ class Source:
             with urllib.request.urlopen(req, context=self.ctx, timeout=120) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
-            raise MigrationError(f"{path}: {exc.code} {exc.read()[:200].decode('utf-8', 'replace')}") from None
+            detail = exc.read()[:300].decode("utf-8", "replace")
+            if exc.code == 401:
+                raise MigrationError("O servidor antigo recusou o token. Crie outro: acervo-ctl token migracao") from None
+            raise MigrationError(f"{path}: {exc.code} {detail}") from None
+        except (urllib.error.URLError, OSError) as exc:
+            raise MigrationError(f"Não consegui falar com {self.base}: {getattr(exc, 'reason', exc)}") from None
 
     def stream(self, path: str, params: dict | None = None) -> tuple[dict, Iterator[bytes]]:
         if self.client is not None:
@@ -84,6 +89,8 @@ class Source:
             resp = urllib.request.urlopen(req, context=self.ctx, timeout=300)
         except urllib.error.HTTPError as exc:
             raise MigrationError(f"{path}: {exc.code}") from None
+        except (urllib.error.URLError, OSError) as exc:
+            raise MigrationError(f"Não consegui falar com {self.base}: {getattr(exc, 'reason', exc)}") from None
         headers = {k.lower(): v for k, v in resp.headers.items()}
 
         def chunks():

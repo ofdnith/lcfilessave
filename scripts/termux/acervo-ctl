@@ -51,14 +51,14 @@ for p in h["problems"]:
 EOF
     else
       echo "Servidor: não responde"
-      exit 1
     fi
+    $ACERVO config 2>/dev/null | grep -i "impressão" || true
     ;;
   logs) tail -n 80 -f "$LOG" ;;
   senha) $ACERVO senha && echo "Reinicie com: acervo-ctl restart" ;;
-  token) $ACERVO token criar "${2:-iPhone}" ;;
+  token) $ACERVO token criar "${2:-iPhone}" ;;   # para migrar: acervo-ctl token migracao
   cidades) $ACERVO baixar-cidades ;;
-  verificar) $ACERVO verificar ;;
+  verificar) "$0" stop; $ACERVO verificar; "$0" start ;;
   atualizar)
     cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/termux/instalar.sh"
     ;;

@@ -25,7 +25,9 @@ gatilho bloquear algo, conserte o código, não o gatilho.
 - `server/acervo/library.py` — manter, descartar, restaurar, purgar (toda movimentação de bytes)
 - `server/acervo/storage.py` — `move_verified`, hash, fsync
 - `server/acervo/jobs.py` — fila em disco: miniaturas, pHash, lugar, texto, OCR; manutenção
-- `server/acervo/api/` — rotas; `archive.py` é o arquivamento em HD
+- `server/acervo/api/` — rotas; `archive.py` é o arquivamento em HD, `migration.py` o lado antigo da migração
+- `server/acervo/migrate.py` — `acervo migrar` (lado novo); `push.py` — avisos (RFC 8291 + VAPID)
+- `scripts/linux/` — instalador do mini PC (systemd); `docs/migrar.md` — tutorial de mudança
 - `web/` — Svelte; `mac/` — Tauri; `scripts/termux/` — Realme
 
 ## Convenções

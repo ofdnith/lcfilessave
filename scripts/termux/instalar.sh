@@ -64,7 +64,9 @@ if [[ -z "$IP" || "$IP" == "0.0.0.0" ]]; then
 fi
 ok "IP local: $IP (reserve este IP no roteador — veja docs/realme.md)"
 TS_NAME=""
-read -r -p "  Nome do Tailscale deste celular (ex.: realme.tail1234.ts.net) — Enter para pular: " TS_NAME || true
+echo "  Dica: no painel do Tailscale (login.tailscale.com → Machines), renomeie este celular para 'acervo'."
+echo "  Assim o endereço é sempre acervo.<sua-rede>.ts.net, mesmo se um dia o servidor mudar de aparelho."
+read -r -p "  Nome do Tailscale deste celular (ex.: acervo.tail1234.ts.net) — Enter para pular: " TS_NAME || true
 BACKUP_DIR=""
 if ask "Guardar uma cópia diária do catálogo na memória compartilhada (recomendado)?"; then
   termux-setup-storage || true

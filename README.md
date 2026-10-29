@@ -15,6 +15,7 @@ catálogo continua navegável e buscável mesmo depois que os originais vão par
 | Guia | Para quê |
 |---|---|
 | [docs/realme.md](docs/realme.md) | Instalar o servidor no Realme (Termux) |
+| [docs/migrar.md](docs/migrar.md) | Mudar o Acervo para um mini PC (ou outra máquina) |
 | [docs/iphone.md](docs/iphone.md) | Web app, certificado, Atalhos e backup diário |
 | [mac/README.md](mac/README.md) | Compilar e usar o app do Mac (HDs, Esvaziar iPhone) |
 | [docs/especificacao.md](docs/especificacao.md) | O plano do projeto (fonte da verdade) |
@@ -35,6 +36,18 @@ catálogo continua navegável e buscável mesmo depois que os originais vão par
 | 6 — Busca avançada | Lugar por GPS offline, texto de documentos, OCR só carregando, quase-duplicados (pHash), microSD | ✅ |
 | 7 — Opcional | Busca semântica (CLIP) | ⏸ não feita — veja abaixo |
 
+**Versão 0.2 — melhorias:**
+
+| Melhoria | O que muda |
+|---|---|
+| Prévias médias | Toda foto e vídeo guarda uma prévia de 1024 px (~100 KB) para sempre: o arquivado no HD continua bonito de ver, e fora de casa carrega rápido |
+| Triagem em um toque | "Manter tudo, menos as sugestões": só o que é duplicado, captura de tela ou WhatsApp fica para você decidir |
+| Neste dia, Lugares, Álbuns | Fotos do mesmo dia em anos anteriores; mapa e lista de cidades; álbuns que nunca apagam nada |
+| Atalhos sem complicação | Token criado pela interface; backup diário com 5 ações; links do iCloud dos atalhos prontos |
+| Avisos no iPhone | Backup atrasado, servidor cheio, problema num HD, resumo do backup (Web Push, sem abrir portas) |
+| Modo seguro fora de casa | Pelo Tailscale dá para ver e enviar, mas não apagar nem mexer em HDs |
+| Migração | `acervo migrar` leva tudo para um mini PC conferindo cada arquivo; instalador para Linux com serviço do sistema |
+
 **Fase 7:** o modelo CLIP precisa do `onnxruntime`, que não tem versão para o
 Termux/Android; no Snapdragon 680 cada foto levaria segundos. A fila de tarefas
 já tem o tipo `embedding` reservado: dá para fazer depois, rodando no Mac.
@@ -54,7 +67,7 @@ Sem senha definida, o servidor só aceita este computador.
 ### Testes
 
 ```bash
-scripts/test.sh            # servidor: 99 testes
+scripts/test.sh            # servidor: 119 testes
 cd web && npm run check    # interface: verificação de tipos
 cd mac/src-tauri && cargo test
 ```
@@ -92,7 +105,7 @@ lcfilessave/
 │   └── tests/
 ├── web/             interface Svelte (navegador, PWA do iPhone, app do Mac)
 ├── mac/             app Tauri do Mac (discos, transferência, Esvaziar iPhone)
-├── scripts/         setup-mac.sh, dev.sh, test.sh, termux/ (instalador do Realme)
+├── scripts/         setup-mac.sh, dev.sh, test.sh, termux/ (Realme), linux/ (mini PC)
 └── docs/
 ```
 

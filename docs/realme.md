@@ -24,8 +24,10 @@ pkg install -y git && git clone https://github.com/souzaq001/lcfilessave ~/acerv
 O instalador vai perguntar:
 
 - **IP do celular** — normalmente ele descobre sozinho.
-- **Nome do Tailscale** — no app Tailscale do Realme, toque no aparelho e copie o
-  nome que termina em `.ts.net`. Pode pular e rodar o instalador de novo depois.
+- **Nome do Tailscale** — antes, em **login.tailscale.com → Machines**, renomeie o
+  Realme para **`acervo`**. O nome fica `acervo.<sua-rede>.ts.net` e vale para
+  sempre, mesmo se o servidor um dia for para um mini PC (veja `docs/migrar.md`).
+  Pode pular e rodar o instalador de novo depois.
 - **Cópia diária do catálogo** — responda **s**. O Android vai pedir acesso aos arquivos: permita.
 - **Senha** — a senha que você vai digitar no iPhone e no Mac. Mínimo 8 caracteres.
 
@@ -74,7 +76,8 @@ No Termux:
 | `acervo-ctl token iPhone` | Cria um token para os Atalhos do iPhone |
 | `acervo-ctl senha` | Troca a senha |
 | `acervo-ctl atualizar` | Baixa a versão nova do Acervo e reinstala (os dados ficam) |
-| `acervo-ctl verificar` | Confere disco × catálogo e corrige o que der |
+| `acervo-ctl verificar` | Para o servidor, confere disco × catálogo, corrige o que der e religa |
+| `acervo-ctl token migracao` | Token para levar o Acervo para outra máquina (`docs/migrar.md`) |
 
 Quando o celular reinicia, o Acervo sobe sozinho uns 20 segundos depois.
 
