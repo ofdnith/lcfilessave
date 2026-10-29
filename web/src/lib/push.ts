@@ -7,6 +7,8 @@ export const topicLabels: Record<PushTopic, string> = {
   espaco: 'Servidor ficando cheio',
   hd_problema: 'Problema num HD',
   backup_concluido: 'Resumo do backup diário',
+  entrada: 'Entrada esperando triagem',
+  cartao: 'Problema no cartão microSD',
 };
 export const allTopics = Object.keys(topicLabels) as PushTopic[];
 

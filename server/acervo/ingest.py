@@ -76,9 +76,23 @@ def server_copy_ok(cfg: Config, root: str, rel_path: str | None) -> bool:
         return False
 
 
+def quarantine_path(cfg: Config, root: str, name: str) -> Path:
+    """Where a damaged copy is set aside: on the SAME storage as the copy, so
+    setting it aside is a rename (a rename across storages is impossible, and
+    a copy of damaged bytes would be pointless). Never deleted automatically."""
+    base = cfg.subdir("tmp") if root == "main" else cfg.root_dir(root)
+    dest = base / "corrompidos" / f"{now_iso()[:19].replace(':', '')}-{name}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
 def stored_safely(cfg: Config, conn: sqlite3.Connection, f: sqlite3.Row) -> bool:
-    """Are these bytes really kept somewhere? (f: files row joined with items.state)"""
-    if server_copy_ok(cfg, f["root"], f["rel_path"]):
+    """Are these bytes really kept somewhere? (f: files row joined with items.state)
+
+    A server copy that failed its last health check (files.check_ok = 0) does
+    not count: the client is asked to send the bytes again, which repairs it."""
+    damaged = "check_ok" in f.keys() and f["check_ok"] == 0
+    if server_copy_ok(cfg, f["root"], f["rel_path"]) and not damaged:
         return True
     if f["state"] == "purged":
         return True  # the owner discarded it on purpose; nothing to keep
@@ -93,7 +107,7 @@ def valid_session(conn: sqlite3.Connection, session_id: int | None) -> int | Non
 
 
 KNOWN_SQL = """
-    SELECT f.id AS file_id, f.role, f.rel_path, f.root, i.id AS item_id, i.state, i.kind,
+    SELECT f.id AS file_id, f.role, f.rel_path, f.root, f.check_ok, i.id AS item_id, i.state, i.kind,
            i.captured_at, v.name AS volume_name
     FROM files f JOIN items i ON i.id = f.item_id LEFT JOIN volumes v ON v.id = i.volume_id
     WHERE f.sha256 = ?
@@ -266,10 +280,9 @@ class Ingestor:
                       sha256=sha, to_path=f"{root}:{rel}")
             dest = self.cfg.root_dir(root) / rel
             if dest.exists():  # present but damaged: keep it aside, never delete it blindly
-                quarantine = self.cfg.subdir("tmp") / "corrompidos" / f"{now_iso()[:19].replace(':', '')}-{dest.name}"
-                quarantine.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(dest, quarantine)
+                os.replace(dest, quarantine_path(self.cfg, root, dest.name))
             move_verified(tmp, dest, sha)
+            conn.execute("UPDATE files SET checked_at = ?, check_ok = 1 WHERE id = ?", (now_iso(), known["file_id"]))
         log.warning("Arquivo %s recuperado a partir de um novo envio", rel)
         return {"status": "restored", "item_id": known["item_id"], "sha256": sha,
                 "message": STATUS_MESSAGES["restored"]}
@@ -425,7 +438,7 @@ def reconcile(cfg: Config, ingestor: Ingestor) -> dict:
       * same SHA-256 as a recorded copy that is intact (its hash is re-read)
         or as content safely on a drive / purged -> redundant copy: removed;
       * same SHA-256 as a recorded copy that turned out CORRUPTED -> the
-        damaged one goes to tmp/corrompidos/ and this one takes its place;
+        damaged one goes to corrompidos/ (same storage) and this one takes its place;
       * unknown content -> ingested into the Entrada (never lose bytes).
     Files left in tmp/ by an interrupted reconcile are ingested too.
     """
@@ -497,14 +510,14 @@ def _reconcile_one(cfg, conn, ingestor, root, rel, path, report) -> None:
             report["removed_copies"] += 1
             return
         # The recorded copy is damaged; this one is the good one.
-        quarantine = cfg.subdir("tmp") / "corrompidos" / f"{now_iso()[:19].replace(':', '')}-{recorded.name}"
-        quarantine.parent.mkdir(parents=True, exist_ok=True)
+        quarantine = quarantine_path(cfg, row["root"], recorded.name)
         with transaction(conn):
             log_event(conn, "reconcile", "repair-corrupted-copy", item_id=row["item_id"], file_id=row["file_id"],
                       sha256=sha, from_path=rel, to_path=row["rel_path"],
                       details={"quarantine": str(quarantine)})
             os.replace(recorded, quarantine)
             move_verified(path, recorded, sha)
+            conn.execute("UPDATE files SET checked_at = ?, check_ok = 1 WHERE id = ?", (now_iso(), row["file_id"]))
         report["repaired"] += 1
         return
 

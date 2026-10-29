@@ -16,7 +16,8 @@ Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código
 | 10 | Miniaturas crescendo | WebP 400 px (~20 KB); prévias grandes são cache descartável |
 | 11 | HEIC no Termux | `pillow-heif` se instalar; senão a prévia embutida via exiftool |
 | 12 | Bateria sempre na tomada | Checklist do instalador; tarefas pausam acima de `max_temp_c`; OCR leve |
-| 13 | Cartão microSD falhar | O cartão é uma cópia só do que foi triado — passe lotes para o HD com frequência |
+| 13 | Cartão microSD falhar | Verificação diária (cartão inteiro a cada 30 dias); arquivo com defeito volta pelo backup do iPhone |
+| 14 | Entrada parada | Só existe no celular; aviso com 7 dias ou 5 GB sem triagem |
 
 ## 1. Um único HD é uma única cópia — **decisão do dono**
 
@@ -142,7 +143,20 @@ fica **só no cartão** até ir para um HD. Isso protege contra perder o celular
 mas cartões falham mais que memória interna (desgaste, contato, falsificados).
 
 **Tratamento:** a cópia para o cartão relê e confere o SHA-256 antes de apagar
-a interna; o cartão leva uma cópia diária do catálogo (`acervo-resgate/`) e um
-`LEIA-ME.txt`. Use cartão de marca (A1/A2, U3) em armazenamento portátil exFAT —
+a interna; o cartão leva uma cópia diária do catálogo (`acervo-resgate/`), um
+`LEIA-ME.txt` e um `ABRIR-ACERVO.html` com miniaturas, que abre em qualquer navegador.
+Todo dia uma fatia do cartão é relida e conferida (o cartão inteiro a cada 30
+dias). Um arquivo com defeito vira aviso e deixa de contar como guardado: se a
+foto ainda estiver no iPhone, o backup diário a manda de novo e o envio a repara;
+a cópia estragada vai para `corrompidos/` no próprio cartão, nunca é apagada. Use cartão de marca (A1/A2, U3) em armazenamento portátil exFAT —
 **nunca** "formatar como memória interna", que o deixa ilegível fora do
 celular — e mande lotes para o HD sem esperar o cartão encher.
+
+## 14. A Entrada só existe no celular
+
+O que ainda não passou pela triagem está só na memória interna. Se o celular se
+perder, isso vai junto.
+
+**Tratamento:** um aviso no topo do Acervo (e notificação, no máximo a cada 3
+dias) quando algo está na Entrada há `inbox_alert_days` dias (7) ou quando ela
+passa de `inbox_alert_gb` (5 GB). Fazer a triagem leva tudo para o cartão.

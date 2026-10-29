@@ -108,9 +108,32 @@ iPhone/Mac ──► Entrada (memória interna, até 100 GB) ──triagem──
   memória interna e vai para o cartão sozinho quando houver espaço.
 
 **Se o celular se perder**, o cartão tem tudo o que já passou pela triagem e
-ainda não foi para um HD, em pastas comuns (`acervo/AAAA/MM/fotos`…), mais uma
-cópia diária do catálogo e um `LEIA-ME.txt` em `acervo-resgate/`. O que ainda
-estava na Entrada (sem triagem) estava só no celular.
+ainda não foi para um HD, em pastas comuns (`acervo/AAAA/MM/fotos`…). Num
+computador, abra o **`ABRIR-ACERVO.html`** do cartão: ele mostra as fotos com
+miniaturas, por mês, com busca, sem instalar nada — igual ao dos HDs. Há também
+uma cópia diária do catálogo e um `LEIA-ME.txt` em `acervo-resgate/`.
+
+O que ainda estava na **Entrada** (sem triagem) estava só no celular. Por isso o
+Acervo avisa quando algo fica na Entrada há mais de **7 dias** ou quando ela passa
+de **5 GB** (`inbox_alert_days` e `inbox_alert_gb`).
+
+### Saúde do cartão
+
+Todo dia o Acervo relê uma fatia do cartão e confere o SHA-256 de cada arquivo,
+começando pelos conferidos há mais tempo; em 30 dias o cartão inteiro passa pela
+verificação. Se um arquivo não conferir:
+
+- aparece um aviso vermelho no Acervo (e uma notificação, se ligada);
+- se a foto ainda estiver no iPhone, o **próximo backup diário a recupera sozinho**:
+  por 3 dias, o servidor pede ao atalho que volte até a data da foto estragada
+  (esses backups mandam mais fotos antigas que o normal; as repetidas são
+  reconhecidas pelo hash e não ocupam espaço). Fotos que já saíram do iPhone
+  ("Esvaziar iPhone") só voltam de um HD ou de outra cópia sua;
+- a cópia estragada vai para `corrompidos/` no cartão (nunca é apagada);
+- mais de um arquivo com defeito costuma ser o cartão morrendo: troque-o e
+  mande um lote para o HD o quanto antes.
+
+`acervo-ctl status` mostra quanto do cartão foi conferido nos últimos 30 dias.
 
 ### Antes de usar
 

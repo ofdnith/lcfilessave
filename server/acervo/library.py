@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db
-from .catalog import (free_rel_path, get_setting, inbox_bytes, iso_in, library_bytes_by_root, library_dir, log_event, now_iso,
-                      preview_path, transaction)
+from . import db, sdcard
+from .catalog import (free_rel_path, get_setting, inbox_bytes, iso_in, library_bytes_by_root, library_dir, log_event,
+                      now_iso, parse_iso, preview_path, transaction)
 from .config import INBOX_DIR, TRASH_DIR, Config
 from .storage import VerificationError, copy_verified, disk_usage, fsync_dir, move_verified
 
@@ -182,7 +183,9 @@ def _copy_then_switch(cfg: Config, conn: sqlite3.Connection, item_id: int, root:
                     or now[f["id"]]["rel_path"] != f["rel_path"] for f, *_ in made):
                 raise _Changed
             for f, new_rel, _src, _dst in made:
-                conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (new_rel, root, f["id"]))
+                # copy_verified just re-read it: this is also a health check.
+                conn.execute("UPDATE files SET rel_path = ?, root = ?, checked_at = ?, check_ok = 1 WHERE id = ?",
+                             (new_rel, root, now_iso(), f["id"]))
                 log_event(conn, actor, action, item_id=item_id, file_id=f["id"], sha256=f["sha256"],
                           from_path=f"{f['root']}:{f['rel_path']}", to_path=f"{root}:{new_rel}")
     except BaseException:
@@ -240,10 +243,22 @@ def storage_summary(cfg: Config, conn: sqlite3.Connection) -> dict:
     """Entrada limit and microSD state, for /api/stats and /api/health."""
     inbox = inbox_bytes(conn)
     limit = cfg.inbox_max_gb * 1_000_000_000
+    oldest = conn.execute("SELECT min(uploaded_at) FROM items WHERE state = 'inbox'").fetchone()[0]
+    days = int((datetime.now(timezone.utc) - parse_iso(oldest)).total_seconds() // 86400) if oldest else None
+    reasons = []
+    if cfg.inbox_alert_days and days is not None and days >= cfg.inbox_alert_days:
+        reasons.append("dias")
+    if cfg.inbox_alert_gb and inbox >= cfg.inbox_alert_gb * 1_000_000_000:
+        reasons.append("tamanho")
     data: dict = {
         "inbox_bytes": inbox,
         "inbox_max_bytes": limit or None,
         "inbox_alert": bool(limit) and inbox >= limit * 0.9,
+        # Reminder to triage (lighter than inbox_alert): what is in the Entrada is
+        # only on the phone, so it should not sit there for long.
+        "inbox_oldest_at": oldest,
+        "inbox_waiting_days": days,
+        "inbox_reminder": {"reasons": reasons, "days": days, "bytes": inbox} if reasons else None,
         "sd": None,
     }
     if cfg.sd_dir is not None:
@@ -260,8 +275,18 @@ def storage_summary(cfg: Config, conn: sqlite3.Connection) -> dict:
             "pending_bytes": pending,
             # Full enough that the next HD batch should come from the card.
             "alert": (not present) or (usage is not None and usage.used_pct >= cfg.storage_alert_pct),
+            "health": sdcard.health(cfg, conn),
         }
     return data
+
+
+def inbox_reminder_text(reminder: dict) -> str:
+    gb = f"{reminder['bytes'] / 1e9:.1f}".replace(".", ",")
+    days = reminder["days"]
+    parts = [f"{gb} GB na Entrada"]
+    if days:
+        parts.append(f"a mais antiga chegou há {days} dia{'s' if days != 1 else ''}")
+    return " · ".join(parts) + ". Até a triagem, isso só existe no celular."
 
 
 def pending_sd_bytes(conn: sqlite3.Connection) -> int:

@@ -36,6 +36,12 @@ trash_days = 30
 # Passou disso, o servidor recusa novos envios até a triagem liberar espaço.
 inbox_max_gb = 100
 
+# Lembrete de triagem: avisa quando algo está na Entrada há mais destes dias
+# ou quando ela passa destes GB (o que está na Entrada só existe no celular).
+# 0 desliga cada um.
+inbox_alert_days = 7
+inbox_alert_gb = 5
+
 # As tarefas de fundo (miniaturas, OCR…) pausam com a bateria nesta temperatura
 # e voltam 3 °C abaixo. O celular vive na tomada; isso poupa a bateria.
 max_temp_c = 40

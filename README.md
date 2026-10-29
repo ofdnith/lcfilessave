@@ -7,7 +7,8 @@ catálogo continua navegável e buscável mesmo depois que os originais vão par
 
 Caminho de um arquivo: **Entrada** na memória interna (até 100 GB) → triagem →
 **Acervo no cartão microSD** (cópia conferida por SHA-256, para sobreviver à perda
-do celular) → **HD**, em lotes, quando o cartão enche. Veja [docs/realme.md](docs/realme.md#6-cartão-microsd--onde-fica-o-que-já-foi-triado).
+do celular, conferido todo dia e navegável por um `ABRIR-ACERVO.html`) → **HD**,
+em lotes, quando o cartão enche. Um aviso lembra da triagem com 7 dias ou 5 GB na Entrada. Veja [docs/realme.md](docs/realme.md#6-cartão-microsd--onde-fica-o-que-já-foi-triado).
 
 ```
  iPhone (web app + Atalhos) ─┐                         ┌─ HD VOLUME-001 (exFAT)
@@ -71,7 +72,7 @@ Sem senha definida, o servidor só aceita este computador.
 ### Testes
 
 ```bash
-scripts/test.sh            # servidor: 142 testes
+scripts/test.sh            # servidor: 163 testes
 cd web && npm run check    # interface: verificação de tipos
 cd mac/src-tauri && cargo test
 ```
@@ -134,5 +135,8 @@ acervo-dados/
 cartão microSD (sd_dir)
 ├── acervo/        AAAA/MM/… — o que já passou pela triagem
 ├── lixeira/       descartes de itens que estavam no cartão
-└── acervo-resgate/ cópia diária do catálogo + LEIA-ME.txt
+├── acervo-resgate/ cópia diária do catálogo + LEIA-ME.txt
+├── corrompidos/   cópias que falharam na verificação (nunca apagadas)
+├── .acervo/miniaturas/
+└── ABRIR-ACERVO.html  navegador offline do cartão
 ```

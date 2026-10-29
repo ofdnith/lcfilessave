@@ -108,6 +108,8 @@ if [[ ! -f "$CONF" ]]; then
       echo "sd_for_library = true"
     fi
     echo "inbox_max_gb = 100"
+    echo "inbox_alert_days = 7"
+    echo "inbox_alert_gb = 5"
     echo "max_temp_c = 40"
     echo "storage_alert_pct = 80"
     echo "archive_batch_gb = 80"

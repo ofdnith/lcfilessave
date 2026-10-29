@@ -124,6 +124,12 @@
   });
 
   const overdue = $derived(app.stats?.daily_backup.overdue ?? false);
+  const reminder = $derived(app.stats?.storage.inbox_reminder ?? null);
+  const sdHealth = $derived(app.stats?.storage.sd?.health ?? null);
+
+  function gbText(n: number): string {
+    return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: n >= 10e9 ? 0 : 1 }).format(n / 1e9);
+  }
 </script>
 
 <svelte:window onkeydown={onKey} ondragenter={dragEnter} ondragleave={dragLeave} ondragover={dragOver} ondrop={drop} />
@@ -154,6 +160,25 @@
     {/if}
     {#if overdue}
       <div class="banner top-banner" role="status"><Icon name="alert" size={18} /> Backup diário atrasado: mais de 48 h</div>
+    {/if}
+    {#if reminder && router.route !== 'entrada'}
+      <a class="banner top-banner" href="#/entrada">
+        <Icon name="alert" size={18} />
+        <span>
+          Entrada esperando triagem: {gbText(reminder.bytes)} GB{#if reminder.days}, a mais antiga há {reminder.days}
+            {reminder.days === 1 ? 'dia' : 'dias'}{/if}. Até a triagem, isso só existe no celular.
+        </span>
+      </a>
+    {/if}
+    {#if sdHealth && sdHealth.damaged > 0}
+      <div class="banner danger top-banner" role="status">
+        <Icon name="alert" size={18} />
+        <span>
+          {sdHealth.damaged === 1 ? '1 arquivo do cartão microSD não confere' : `${sdHealth.damaged} arquivos do cartão microSD não conferem`}
+          ({sdHealth.damaged_names.join(', ')}{sdHealth.damaged > sdHealth.damaged_names.length ? '…' : ''}). Se ainda
+          estiverem no iPhone, o próximo backup diário os recupera. Considere trocar o cartão.
+        </span>
+      </div>
     {/if}
     {#if app.stats?.storage.alert}
       <div class="banner danger top-banner" role="status">

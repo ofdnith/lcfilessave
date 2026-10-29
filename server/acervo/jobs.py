@@ -22,11 +22,12 @@ import threading
 import time
 from datetime import date
 
-from . import db, media, power
+from . import db, media, power, sdcard
 from .catalog import get_setting, iso_in, medium_path, now_iso, preview_path, set_setting, thumb_path, transaction
 from .config import Config
 from .ingest import add_suggestion
-from .library import migrate_to_sd, purge_expired, resolve_suggestions, sd_available
+from .library import (inbox_reminder_text, migrate_to_sd, purge_expired, resolve_suggestions, sd_available,
+                      storage_summary)
 from .neardup import PhashIndex
 from .places import Gazetteer
 from .textextract import extract_text, ocr_image
@@ -307,10 +308,18 @@ class Worker:
             if cfg.sd_for_library and sd_available(cfg) and get_setting(conn, "last_sd_backup_date") != today:
                 self._backup_to_sd(conn, today)
                 set_setting(conn, "last_sd_backup_date", today)
+            try:
+                sdcard.maintain(cfg, conn, today, notify=self._push)
+            except (OSError, sqlite3.Error):
+                log.exception("Erro na manutenção do cartão microSD")
             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         finally:
             conn.close()
         self._trim_previews()
+
+    def _push(self, topic: str, title: str, body: str, url: str) -> None:
+        from . import push
+        push.notify(self.cfg, topic, title, body, url)
 
     def _notices(self, conn: sqlite3.Connection, today: str) -> None:
         """Push notifications for things the owner should know without opening the app."""
@@ -329,6 +338,11 @@ class Worker:
             set_setting(conn, "notice_space_at", now_iso())
             push.notify(self.cfg, "espaco", "Servidor ficando cheio",
                         f"{server_bytes / 1e9:.0f} GB no servidor. Hora de transferir um lote para um HD.", "/")
+        reminder = storage_summary(self.cfg, conn)["inbox_reminder"]
+        last_inbox = get_setting(conn, "notice_inbox_at")
+        if reminder and (not last_inbox or last_inbox < iso_in(-3)):
+            set_setting(conn, "notice_inbox_at", now_iso())
+            push.notify(self.cfg, "entrada", "Entrada esperando triagem", inbox_reminder_text(reminder), "/#/entrada")
 
     def _backfill_medium(self, conn: sqlite3.Connection) -> None:
         """Items from before medium previews existed: render them, 500 per round."""

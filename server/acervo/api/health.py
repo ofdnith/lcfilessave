@@ -69,6 +69,11 @@ def health(request: Request) -> JSONResponse:
         pass
     if summary:
         storage.update(summary)  # a missing card is already in `problems`
+        damaged = (summary["sd"] or {}).get("health", {}).get("damaged", 0)
+        if damaged:
+            what = "1 arquivo do cartão microSD falhou" if damaged == 1 else \
+                f"{damaged} arquivos do cartão microSD falharam"
+            problems.append(f"{what} na verificação (o backup diário do iPhone recupera o que ainda estiver lá)")
     worker = getattr(request.app.state, "worker", None)
     thermal = worker.thermal.status() if worker is not None else None
 

@@ -56,6 +56,10 @@ class Config:
     sd_for_library: bool = False
     # Maximum size of the Entrada (awaiting triage), in GB. 0 = no limit.
     inbox_max_gb: int = 100
+    # Reminder to triage: Entrada with something older than this many days, or
+    # bigger than this many GB. 0 turns each one off.
+    inbox_alert_days: int = 7
+    inbox_alert_gb: int = 5
     # Background jobs pause while the battery is at or above this temperature (°C).
     max_temp_c: int = 40
     catalog_backup_dir: Path | None = None
@@ -101,6 +105,8 @@ class Config:
                 raise ConfigError(f"remote_networks: rede inválida '{net}'.") from None
         if self.inbox_max_gb < 0:
             raise ConfigError("inbox_max_gb não pode ser negativo (0 = sem limite).")
+        if self.inbox_alert_days < 0 or self.inbox_alert_gb < 0:
+            raise ConfigError("inbox_alert_days e inbox_alert_gb não podem ser negativos (0 = desligado).")
         if not (30 <= self.max_temp_c <= 55):
             raise ConfigError("max_temp_c deve ficar entre 30 e 55 (graus Celsius).")
         if self.sd_for_library and self.sd_dir is None:
@@ -120,7 +126,7 @@ def is_loopback(host: str) -> bool:
 
 
 _INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", "trash_days",
-             "inbox_max_gb", "max_temp_c"}
+             "inbox_max_gb", "max_temp_c", "inbox_alert_days", "inbox_alert_gb"}
 _STR_KEYS = {"host", "server_name", "remote_mode", "shortcut_manual_url", "shortcut_daily_url", "push_contact"}
 _BOOL_KEYS = {"https", "workers", "sd_for_library"}
 _PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir"}

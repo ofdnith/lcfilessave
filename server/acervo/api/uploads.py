@@ -211,7 +211,10 @@ def precheck(body: PrecheckBody, request: Request) -> dict:
                     stamp = fingerprint_time(normalize_client_time(e.created_at))
                     row = conn.execute(
                         "SELECT i.id, i.state FROM fingerprints fp JOIN items i ON i.id = fp.item_id "
-                        "WHERE fp.original_name = ? AND fp.client_created_at = ? AND fp.size_bytes = ?",
+                        "WHERE fp.original_name = ? AND fp.client_created_at = ? AND fp.size_bytes = ? "
+                        # A copy that failed its health check: ask for the file again (repairs it).
+                        "AND NOT EXISTS (SELECT 1 FROM files f WHERE f.item_id = i.id AND f.check_ok = 0 "
+                        "AND f.rel_path IS NOT NULL)",
                         (e.name, stamp, e.size)).fetchone() if stamp else None
                     if row:
                         res.update(known=True, by="fingerprint", state=row["state"], item_id=row["id"])

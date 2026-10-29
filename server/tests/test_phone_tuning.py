@@ -21,7 +21,7 @@ from acervo.jobs import Worker
 from acervo.neardup import PhashIndex, np
 from acervo.places import Gazetteer
 
-from conftest import Api, login, make_jpeg, sha
+from conftest import make_jpeg, sha
 
 
 # --- heat ---------------------------------------------------------------------------------
@@ -167,15 +167,6 @@ def test_inbox_limit_in_config(tmp_path):
 
 
 # --- microSD as the home of the Acervo ------------------------------------------------------
-
-@pytest.fixture
-def sd_api(tmp_path: Path):
-    (tmp_path / "sd").mkdir()
-    cfg = Config(data_dir=tmp_path / "dados", workers=False, web_dir=tmp_path / "sem-web",
-                 sd_dir=tmp_path / "sd", sd_for_library=True)
-    with TestClient(create_app(cfg)) as client:
-        yield Api(client, cfg, login(client, cfg))
-
 
 def _files(cfg, item_id):
     c = db.connect(cfg.db_path)
