@@ -50,14 +50,29 @@
       .catch(() => (summary = null));
   });
 
+  // While new arrivals are still being analysed, check again every few seconds so
+  // the one-tap button appears as soon as it is safe.
+  $effect(() => {
+    if (!summary?.processing) return;
+    const t = setTimeout(() => {
+      api.inboxSummary().then((s) => (summary = s)).catch(() => {});
+    }, 4000);
+    return () => clearTimeout(t);
+  });
+
   async function keepClean() {
     const s = summary;
     if (!s || !s.clean || keeping) return;
     const ok = await confirmSheet({
       title: `Manter ${plural(s.clean, 'item', 'itens')} no Acervo?`,
-      body: s.flagged
-        ? `${s.flagged === 1 ? 'O 1 sinalizado continua' : `Os ${num(s.flagged)} sinalizados continuam`} na Entrada para você decidir.`
-        : 'Nenhum item está em sugestões; a Entrada fica vazia.',
+      body: [
+        s.flagged
+          ? `${s.flagged === 1 ? 'O 1 sinalizado continua' : `Os ${num(s.flagged)} sinalizados continuam`} na Entrada para você decidir.`
+          : '',
+        s.processing
+          ? `${s.processing === 1 ? '1 item ainda está' : `${num(s.processing)} itens ainda estão`} sendo analisado${s.processing === 1 ? '' : 's'} e fica${s.processing === 1 ? '' : 'm'} na Entrada por enquanto.`
+          : '',
+      ].filter(Boolean).join(' ') || 'Nenhum item está em sugestões; a Entrada fica vazia.',
       confirm: `Manter ${num(s.clean)}`,
     });
     if (!ok) return;
@@ -126,6 +141,9 @@
       <span class="label">{count === 1 ? 'item aguardando triagem' : 'itens aguardando triagem'}</span>
     </div>
     <div class="hero-actions">
+      {#if summary && summary.clean === 0 && summary.processing > 0}
+        <span class="analysing">Analisando {num(summary.processing)} {summary.processing === 1 ? 'item' : 'itens'}…</span>
+      {/if}
       {#if summary && summary.clean > 0}
         <button class="btn keep-all" onclick={keepClean} disabled={keeping}>
           <Icon name="check" size={17} />
@@ -210,6 +228,11 @@
   }
   .keep-all:hover {
     background: rgba(107, 212, 155, 0.22);
+  }
+  .analysing {
+    align-self: center;
+    color: var(--muted, #8b93a3);
+    font-size: 14px;
   }
   .hero-actions {
     display: flex;

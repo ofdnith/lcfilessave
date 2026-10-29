@@ -74,6 +74,7 @@ if ask "Guardar uma cópia diária do catálogo na memória compartilhada (recom
   BACKUP_DIR="$HOME/storage/shared/Acervo-copia-do-catalogo"
 fi
 if [[ ! -f "$CONF" ]]; then
+  read -r -p "  Seu e-mail (só vai junto dos avisos para o serviço da Apple; Enter para pular): " EMAIL
   {
     echo "# Gerado pelo instalar.sh em $(date '+%d/%m/%Y'). Comentários: acervo.example.toml"
     echo "data_dir = \"$DATA\""
@@ -86,6 +87,7 @@ if [[ ! -f "$CONF" ]]; then
     echo "storage_alert_pct = 80"
     echo "archive_batch_gb = 80"
     echo "archive_copies = 1"
+    if [[ -n "${EMAIL:-}" ]]; then echo "push_contact = \"mailto:$EMAIL\""; fi
   } > "$CONF"
   ok "criado $CONF"
 else

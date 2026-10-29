@@ -10,6 +10,8 @@ CONF="$REPO/acervo.toml"
 ACERVO="$REPO/server/.venv/bin/acervo --config $CONF"
 PIDFILE="$DATA/supervisor.pid"
 LOG="$DATA/logs/servidor.log"
+HEALTH="$(mktemp)"   # Termux has no /tmp; mktemp uses $TMPDIR
+trap 'rm -f "$HEALTH"' EXIT
 
 running() { [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 
@@ -38,10 +40,10 @@ case "${1:-status}" in
   status)
     if running; then echo "Supervisor: rodando (pid $(cat "$PIDFILE"))"; else echo "Supervisor: parado"; fi
     proto=http; grep -q '^https = true' "$CONF" 2>/dev/null && proto=https
-    if curl -ksf "$proto://127.0.0.1:8765/api/health" -o /tmp/acervo-health.json 2>/dev/null; then
-      python - <<'EOF'
-import json
-h = json.load(open("/tmp/acervo-health.json"))
+    if curl -ksf "$proto://127.0.0.1:8765/api/health" -o "$HEALTH" 2>/dev/null; then
+      python - "$HEALTH" <<'EOF'
+import json, sys
+h = json.load(open(sys.argv[1]))
 s = h["storage"]
 print(f"Servidor: {'OK' if h['status'] == 'ok' else 'COM PROBLEMA'} · versão {h['version']}")
 print(f"Disco: {s['free_bytes']/1e9:.1f} GB livres de {s['total_bytes']/1e9:.0f} GB ({s['used_pct']}% usado)")

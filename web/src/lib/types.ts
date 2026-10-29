@@ -237,6 +237,8 @@ export interface AuthStatus {
 export interface InboxSummary {
   total: number;
   flagged: number;
+  /** not analysed yet (thumbnail / near-duplicate check pending): never kept in one tap */
+  processing: number;
   clean: number;
 }
 

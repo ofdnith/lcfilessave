@@ -44,7 +44,7 @@ from .catalog import (
     transaction,
 )
 from .config import INBOX_DIR, LIBRARY_DIR, TRASH_DIR, Config
-from .storage import move_verified, sha256_file
+from .storage import TEMP_SUFFIX, move_verified, sha256_file
 
 log = logging.getLogger(__name__)
 
@@ -406,7 +406,7 @@ def filename_on_drive(conn: sqlite3.Connection, file_id: int, fallback: str) -> 
 # --- crash recovery ---------------------------------------------------------------------------
 
 SKIP_SUFFIXES = (".tmp",)
-PARTIAL_SUFFIX = ".part"
+PARTIAL_SUFFIX = TEMP_SUFFIX
 _STANDARD_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{4}_(.+)$")
 
 
@@ -419,7 +419,8 @@ def reconcile(cfg: Config, ingestor: Ingestor) -> dict:
 
     For every file under entrada/, acervo/ and lixeira/ that the catalog does
     not point to (checked again, file by file, right before acting):
-      * '.part' files are unfinished copies whose source still exists: removed;
+      * '.acervo-tmp' files are unfinished copies whose source still exists:
+        removed (never a file the catalog knows, whatever its name);
       * same SHA-256 as a cataloged file whose recorded path is missing
         -> the move happened but the catalog update did not: fix the path;
       * same SHA-256 as a recorded copy that is intact (its hash is re-read)
@@ -446,13 +447,15 @@ def reconcile(cfg: Config, ingestor: Ingestor) -> dict:
                 for dirpath, _dirs, names in os.walk(folder):
                     for name in names:
                         path = Path(dirpath) / name
-                        if name.endswith(PARTIAL_SUFFIX):
+                        rel = path.relative_to(base).as_posix()
+                        if name.endswith(PARTIAL_SUFFIX) and not conn.execute(
+                                "SELECT 1 FROM files WHERE root = ? AND rel_path = ?", (root, rel)).fetchone():
                             path.unlink(missing_ok=True)
                             report["partials_removed"] += 1
                             continue
                         if name.endswith(SKIP_SUFFIXES) or name.startswith("."):
                             continue
-                        _reconcile_one(cfg, conn, ingestor, root, path.relative_to(base).as_posix(), path, report)
+                        _reconcile_one(cfg, conn, ingestor, root, rel, path, report)
         for r in conn.execute("SELECT root, rel_path FROM files WHERE rel_path IS NOT NULL"):
             base = cfg.data_dir if r[0] == "main" else cfg.sd_dir
             if base is not None and not (base / r[1]).exists():

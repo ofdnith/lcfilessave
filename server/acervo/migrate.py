@@ -6,7 +6,7 @@ running, frozen read-only, and never deletes anything:
   1. tell the old server to freeze (POST /api/migration/start)
   2. download a consistent copy of its catalog
   3. download every file in its manifest (originals, thumbnails, medium
-     previews, certificates, city list) to <file>.part, fsync, check the
+     previews, certificates, city list) to <file>.acervo-tmp, fsync, check the
      SHA-256 (originals against the catalog), rename
   4. adjust the catalog to this machine (microSD paths become local paths)
   5. confirm every original is present with the right size, write MIGRACAO.txt
@@ -33,7 +33,7 @@ from typing import Callable, Iterator
 from . import db
 from .catalog import now_iso
 from .config import Config
-from .storage import ensure_layout, fsync_dir
+from .storage import TEMP_SUFFIX, ensure_layout, fsync_dir
 
 STATE_FILE = ".migracao.json"
 CHUNK = 1024 * 1024
@@ -143,7 +143,7 @@ def _download(source: Source, entry: dict, dest: Path, report: Report) -> None:
                 report.skipped += 1
                 return
             dest.parent.mkdir(parents=True, exist_ok=True)
-            part = dest.with_name(dest.name + ".part")
+            part = dest.with_name(dest.name + TEMP_SUFFIX)
             h = hashlib.sha256()
             with open(part, "wb") as fh:
                 for block in chunks:
@@ -193,8 +193,8 @@ def run(cfg: Config, source: Source, progress: Callable[[str], None] = print) ->
                                  "Use uma pasta de dados vazia para receber a migração.")
     state_path.write_text(json.dumps({"from": source.base, "started_at": now_iso()}))
 
-    progress("Congelando o servidor antigo (fica só para consulta)…")
-    source.json("POST", "/api/migration/start")
+    progress("Congelando o servidor antigo (fica só para consulta) e esperando envios em andamento…")
+    started = source.json("POST", "/api/migration/start")
 
     progress("Copiando o catálogo…")
     headers, chunks = source.stream("/api/migration/catalog")
@@ -206,6 +206,7 @@ def run(cfg: Config, source: Source, progress: Callable[[str], None] = print) ->
         os.fsync(fh.fileno())
     if headers.get("x-acervo-sha256") and _sha256(incoming) != headers["x-acervo-sha256"]:
         raise MigrationError("O catálogo chegou corrompido; rode de novo.")
+    snapshot_marker = headers.get("x-acervo-marker") or started.get("marker")
     check = sqlite3.connect(incoming)
     try:
         if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -219,8 +220,11 @@ def run(cfg: Config, source: Source, progress: Callable[[str], None] = print) ->
     manifest = source.json("GET", "/api/migration/manifest")
     files = manifest["files"]
     free = shutil.disk_usage(cfg.data_dir).free
-    if manifest["total_bytes"] > free:
-        raise MigrationError(f"Espaço insuficiente: precisa de {manifest['total_bytes'] / 1e9:.1f} GB, "
+    still_needed = sum(f["size"] for f in files
+                       if not ((cfg.data_dir / f["path"]).is_file()
+                               and (cfg.data_dir / f["path"]).stat().st_size == f["size"]))
+    if still_needed > free:
+        raise MigrationError(f"Espaço insuficiente: faltam copiar {still_needed / 1e9:.1f} GB, "
                              f"há {free / 1e9:.1f} GB livres.")
     progress(f"Copiando {len(files)} arquivos ({manifest['total_bytes'] / 1e9:.1f} GB), conferindo cada hash…")
     report = Report()
@@ -246,6 +250,17 @@ def run(cfg: Config, source: Source, progress: Callable[[str], None] = print) ->
     finally:
         conn.close()
     report.failed += [f"{m}: ausente depois da cópia" for m in missing if not any(m in f for f in report.failed)]
+
+    # Did the old server change after the catalog copy? Then something might be missing.
+    if snapshot_marker and source.json("GET", "/api/migration/marker")["marker"] != snapshot_marker:
+        report.failed.append("O servidor antigo mudou durante a cópia; rode o migrar de novo para trazer o que faltou.")
+
+    conn = db.connect(cfg.db_path)
+    try:  # the migration token was copied with the catalog; it has no use here
+        conn.execute("UPDATE auth_tokens SET revoked_at = ? WHERE kind = 'migration' AND revoked_at IS NULL",
+                     (now_iso(),))
+    finally:
+        conn.close()
 
     lines = [
         "Migração do Acervo",

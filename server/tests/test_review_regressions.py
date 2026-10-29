@@ -319,7 +319,7 @@ def test_18_thumbnails_survive_purge(api, tmp_path):
 
 
 def test_19_partial_copies_are_cleaned(api, tmp_path):
-    part = api.cfg.data_dir / "acervo" / "2024" / "x.JPG.part"
+    part = api.cfg.data_dir / "acervo" / "2024" / "x.JPG.acervo-tmp"
     part.parent.mkdir(parents=True)
     part.write_bytes(b"half")
     assert reconcile(api.cfg, api.client.app.state.ingestor)["partials_removed"] == 1

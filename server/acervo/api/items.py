@@ -259,6 +259,10 @@ async def preview(item_id: int, request: Request) -> FileResponse:
 
 FLAGGED = ("EXISTS (SELECT 1 FROM suggestion_items si JOIN suggestions s ON s.id = si.suggestion_id "
            "WHERE si.item_id = items.id AND s.status = 'open')")
+# Not analysed yet: the near-duplicate check runs with the thumbnail, so these
+# could still become suggestions. They are never kept in one tap.
+PROCESSING = ("(items.thumb_status = 'pending' OR EXISTS (SELECT 1 FROM jobs j WHERE j.item_id = items.id "
+              "AND j.kind = 'thumbnail' AND j.status IN ('pending', 'running')))")
 
 
 @router.get("/inbox/summary")
@@ -268,9 +272,11 @@ def inbox_summary(request: Request) -> dict:
         library.resolve_suggestions(conn)
         total = conn.execute("SELECT count(*) FROM items WHERE state = 'inbox'").fetchone()[0]
         flagged = conn.execute(f"SELECT count(*) FROM items WHERE state = 'inbox' AND {FLAGGED}").fetchone()[0]
+        processing = conn.execute(f"SELECT count(*) FROM items WHERE state = 'inbox' AND NOT {FLAGGED} "
+                                  f"AND {PROCESSING}").fetchone()[0]
     finally:
         conn.close()
-    return {"total": total, "flagged": flagged, "clean": total - flagged}
+    return {"total": total, "flagged": flagged, "processing": processing, "clean": total - flagged - processing}
 
 
 @router.post("/inbox/keep-clean")
@@ -278,7 +284,8 @@ async def inbox_keep_clean(request: Request) -> dict:
     cfg = request.app.state.config
     conn = _conn(request)
     try:
-        ids = [r[0] for r in conn.execute(f"SELECT id FROM items WHERE state = 'inbox' AND NOT {FLAGGED}")]
+        ids = [r[0] for r in conn.execute(
+            f"SELECT id FROM items WHERE state = 'inbox' AND NOT {FLAGGED} AND NOT {PROCESSING}")]
     finally:
         conn.close()
     result = await run_in_threadpool(library.apply_action, cfg, ids, "keep", "web") if ids else {"ok": [], "failed": []}

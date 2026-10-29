@@ -8,6 +8,7 @@ deletes anything; the owner switches it off after checking the new one.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import sqlite3
@@ -17,12 +18,17 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from .. import auth, db
 from ..catalog import get_setting, log_event, now_iso, set_setting, transaction
 from ..config import CERTS_DIR, GEO_DIR, THUMBS_DIR
+from ..storage import sha256_file
 
-router = APIRouter(prefix="/api/migration", dependencies=[Depends(auth.require_auth), Depends(auth.forbid_remote)])
+# Only a short-lived migration token, and only from the home network.
+router = APIRouter(prefix="/api/migration",
+                   dependencies=[Depends(auth.forbid_remote), Depends(auth.require_migration_token)])
+DRAIN_TIMEOUT_S = 300
 AUX_DIRS = (THUMBS_DIR, CERTS_DIR, GEO_DIR)
 
 
@@ -35,20 +41,65 @@ def migration_state(cfg) -> dict:
     return {"active": bool(started), "started_at": started or None}
 
 
+def catalog_marker(conn: sqlite3.Connection) -> str:
+    """Changes whenever anything is added, moved or deleted: compared at the end of
+    the migration to prove the old server did not change while it was copied."""
+    r = conn.execute(
+        "SELECT (SELECT coalesce(max(id), 0) FROM events), (SELECT count(*) FROM files), "
+        "(SELECT count(*) FROM files WHERE rel_path IS NOT NULL), (SELECT coalesce(max(updated_at), '') FROM items), "
+        "(SELECT count(*) FROM items)").fetchone()
+    return "|".join(str(x) for x in r)
+
+
 @router.post("/start")
-def start(request: Request) -> dict:
+async def start(request: Request) -> dict:
+    """Freeze, then wait until nothing is still writing (an upload being hashed, a
+    keep being moved, a background job), then tidy disk and catalog so the copy
+    is complete. Runs on the event loop, like the write guard, so a request is
+    either refused or counted — never in between."""
     cfg = request.app.state.config
-    conn = db.connect(cfg.db_path)
-    try:
-        with transaction(conn):
-            if not get_setting(conn, "migration_active"):
+    state = request.app.state
+    first = not migration_state(cfg)["active"]
+    if first:
+        conn = db.connect(cfg.db_path)
+        try:
+            with transaction(conn):
                 set_setting(conn, "migration_active", now_iso())
                 log_event(conn, "migration", "migration-start")
+        finally:
+            conn.close()
+    state.migration_active = True
+
+    waited = 0.0
+    worker = getattr(state, "worker", None)
+    while state.inflight_writes > 0 or (worker is not None and worker.busy):
+        if waited >= DRAIN_TIMEOUT_S:
+            raise HTTPException(409, "Ainda há envios ou tarefas terminando no servidor antigo. "
+                                     "Espere alguns minutos e rode o migrar de novo.")
+        await asyncio.sleep(0.2)
+        waited += 0.2
+
+    if first:
+        # Files on disk that the catalog does not know yet (left by an old crash) are
+        # cataloged now, so they are part of the copy instead of staying behind.
+        from ..ingest import reconcile
+        await run_in_threadpool(reconcile, cfg, state.ingestor)
+    conn = db.connect(cfg.db_path)
+    try:
+        marker = catalog_marker(conn)
     finally:
         conn.close()
-    state = migration_state(cfg)
-    request.app.state.migration_active = True
-    return state
+    return {**migration_state(cfg), "marker": marker}
+
+
+@router.get("/marker")
+def marker(request: Request) -> dict:
+    _require_active(request)
+    conn = db.connect(request.app.state.config.db_path)
+    try:
+        return {"marker": catalog_marker(conn)}
+    finally:
+        conn.close()
 
 
 @router.post("/cancel")
@@ -86,8 +137,13 @@ def catalog(request: Request) -> FileResponse:
             target.close()
     finally:
         conn.close()
+    conn = db.connect(cfg.db_path)
+    try:
+        mark = catalog_marker(conn)
+    finally:
+        conn.close()
     return FileResponse(tmp, media_type="application/vnd.sqlite3", filename="catalogo.db",
-                        headers={"X-Acervo-SHA256": hashlib.sha256(tmp.read_bytes()).hexdigest()},
+                        headers={"X-Acervo-SHA256": sha256_file(tmp), "X-Acervo-Marker": mark},
                         background=BackgroundTask(tmp.unlink, missing_ok=True))
 
 

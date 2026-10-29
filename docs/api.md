@@ -258,10 +258,11 @@ miniatura e **guardada mesmo depois que o original vai para o HD**.
 
 ## Triagem em um toque
 
-- `GET /api/inbox/summary` → `{total, flagged, clean}` — `flagged` = itens da Entrada que
-  estão em alguma sugestão aberta; `clean` = o resto.
-- `POST /api/inbox/keep-clean` → `{kept, flagged_left}` — mantém (Entrada → Acervo) todos
-  os itens que **não** estão em sugestão aberta. Os sinalizados ficam para decidir.
+- `GET /api/inbox/summary` → `{total, flagged, processing, clean}` — `flagged` = itens da
+  Entrada em alguma sugestão aberta; `processing` = ainda sem análise (miniatura e busca de
+  quase-duplicados pendentes); `clean` = o resto.
+- `POST /api/inbox/keep-clean` → `{kept, flagged_left}` — mantém (Entrada → Acervo) só os
+  itens `clean`. Sinalizados e ainda em análise ficam na Entrada.
 
 ## Neste dia
 
@@ -337,11 +338,14 @@ interface esconde os botões proibidos e mostra "Fora de casa · modo seguro".
 
 ## Migração (servidor antigo → servidor novo)
 
-Usado pelo comando `acervo migrar` no servidor novo; precisa de um token (`acervo token criar migracao`).
+Usado pelo comando `acervo migrar` no servidor novo. Só abre com um **token de migração**
+(`acervo-ctl token migracao`): vale 24 horas, só funciona na rede de casa (nunca pelo
+Tailscale) e não abre nenhuma outra rota — e nenhum outro token abre estas.
 
 | Método | Rota | Resposta |
 |---|---|---|
-| POST | `/api/migration/start` | `{active, started_at}` — servidor antigo entra em modo migração: tudo que altera dados responde 423 |
+| POST | `/api/migration/start` | `{active, started_at, marker}` — congela (tudo que altera dados responde 423), **espera** os envios e tarefas que já estavam rodando terminarem, cataloga arquivos soltos no disco |
+| GET | `/api/migration/marker` | `{marker}` — muda se qualquer coisa mudar no catálogo; o `migrar` compara no fim com a marca da cópia do catálogo |
 | POST | `/api/migration/cancel` | `{active: false}` |
 | GET | `/api/migration/catalog` | cópia consistente do `catalogo.db` (API de backup do SQLite) |
 | GET | `/api/migration/manifest` | `{files: [{kind, path, size, sha256}]}` — originais (sha do catálogo), miniaturas, prévias médias, certificados, base de cidades |

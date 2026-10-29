@@ -47,6 +47,9 @@ class Worker:
         self.gazetteer = gazetteer
         self._stop = threading.Event()
         self._wake = threading.Event()
+        # Each flag is written only by its own thread; migration waits until both are False.
+        self._job_busy = False
+        self._maint_busy = False
         self._threads: list[threading.Thread] = []
 
     # -- lifecycle ----------------------------------------------------------------------
@@ -107,7 +110,18 @@ class Worker:
             n += 1
         return n
 
+    @property
+    def busy(self) -> bool:
+        return self._job_busy or self._maint_busy
+
     def run_once(self) -> bool:
+        self._job_busy = True
+        try:
+            return self._run_once()
+        finally:
+            self._job_busy = False
+
+    def _run_once(self) -> bool:
         conn = db.connect(self.cfg.db_path)
         try:
             if get_setting(conn, "migration_active"):
@@ -231,6 +245,13 @@ class Worker:
     # -- maintenance --------------------------------------------------------------------
 
     def maintenance(self) -> None:
+        self._maint_busy = True
+        try:
+            self._maintenance()
+        finally:
+            self._maint_busy = False
+
+    def _maintenance(self) -> None:
         cfg = self.cfg
         conn = db.connect(cfg.db_path)
         try:
@@ -244,6 +265,7 @@ class Worker:
             self._backfill_medium(conn)
             self._expire_uploads(conn)
             conn.execute("DELETE FROM jobs WHERE status = 'done' AND updated_at < ?", (iso_in(-7),))
+            self._clean_tmp()
             self._notices(conn, today)
             if cfg.catalog_backup_dir is not None and get_setting(conn, "last_backup_date") != today:
                 self._backup_catalog(conn, today)
@@ -284,6 +306,16 @@ class Worker:
         # Archived before this version: the original is gone; the thumbnail is the best we have.
         conn.execute("UPDATE items SET medium_status = 'none' WHERE medium_status = 'pending' AND state = 'archived' "
                      "AND NOT EXISTS (SELECT 1 FROM files f WHERE f.item_id = items.id AND f.rel_path IS NOT NULL)")
+
+    def _clean_tmp(self) -> None:
+        """Catalog snapshots left behind by interrupted downloads."""
+        import time
+        for p in self.cfg.subdir("tmp").glob("tmp*.db"):
+            try:
+                if time.time() - p.stat().st_mtime > 86400:
+                    p.unlink()
+            except OSError:
+                pass
 
     def _expire_uploads(self, conn: sqlite3.Connection) -> None:
         old = conn.execute(

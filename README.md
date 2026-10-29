@@ -67,7 +67,7 @@ Sem senha definida, o servidor só aceita este computador.
 ### Testes
 
 ```bash
-scripts/test.sh            # servidor: 120 testes
+scripts/test.sh            # servidor: 132 testes
 cd web && npm run check    # interface: verificação de tipos
 cd mac/src-tauri && cargo test
 ```

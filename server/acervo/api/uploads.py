@@ -137,21 +137,20 @@ def finish_session(session_id: int, request: Request) -> dict:
 
 @router.post("/daily/finish")
 def daily_finish(request: Request) -> dict:
-    """End of the daily backup Shortcut: closes today's session, returns the notification text."""
-    from datetime import date
+    """End of the daily backup Shortcut: closes the open daily session (if this run
+    sent anything) and returns the notification text for THIS run."""
     cfg = request.app.state.config
     conn = _conn(request)
     try:
         with transaction(conn):
-            day, _, sid = (get_setting(conn, "daily_session") or "").partition(":")
-            row = None
-            if day == date.today().isoformat() and sid.isdigit():
-                row = conn.execute("SELECT * FROM upload_sessions WHERE id = ?", (int(sid),)).fetchone()
-                if row is not None and row["status"] == "open":
-                    conn.execute("UPDATE upload_sessions SET status = 'finished', finished_at = ? WHERE id = ?",
-                                 (now_iso(), row["id"]))
+            sid = get_setting(conn, "daily_session") or ""
+            row = conn.execute("SELECT * FROM upload_sessions WHERE id = ? AND status = 'open'",
+                               (int(sid),)).fetchone() if sid.isdigit() else None
+            if row is not None:
+                conn.execute("UPDATE upload_sessions SET status = 'finished', finished_at = ? WHERE id = ?",
+                             (now_iso(), row["id"]))
             set_setting(conn, "last_daily_backup_at", now_iso())
-        if row is None:
+        if row is None:  # nothing was sent in this run
             data = {"id": None, "source": "iphone-daily", "status": "finished", "new_count": 0,
                     "existing_count": 0, "summary_text": "Backup diário: nada novo", "safe_to_delete": False}
         else:
@@ -220,21 +219,20 @@ _daily_lock = threading.Lock()
 
 
 def daily_session(cfg) -> int:
-    """The iPhone daily backup can send files without managing sessions:
-    everything sent today with source=iphone-daily joins today's session."""
-    from datetime import date
-    today = date.today().isoformat()
+    """The iPhone daily backup can send files without managing sessions: every
+    file sent with source=iphone-daily joins the open daily session (one per
+    run; a run that crosses midnight stays in the same session)."""
     with _daily_lock:
         conn = db.connect(cfg.db_path)
         try:
             with transaction(conn):
-                saved = get_setting(conn, "daily_session") or ""
-                day, _, sid = saved.partition(":")
-                if day == today and sid.isdigit() and conn.execute(
+                sid = get_setting(conn, "daily_session") or ""
+                if sid.isdigit() and conn.execute(
                         "SELECT 1 FROM upload_sessions WHERE id = ? AND status = 'open'", (int(sid),)).fetchone():
                     return int(sid)
-                sid = conn.execute("INSERT INTO upload_sessions (source, client_label) VALUES ('iphone-daily', 'Backup diário')").lastrowid
-                set_setting(conn, "daily_session", f"{today}:{sid}")
+                sid = conn.execute("INSERT INTO upload_sessions (source, client_label) "
+                                   "VALUES ('iphone-daily', 'Backup diário')").lastrowid
+                set_setting(conn, "daily_session", str(sid))
                 return sid
         finally:
             conn.close()
@@ -414,11 +412,14 @@ def finish_upload(cfg, ingestor, row: sqlite3.Row, part: Path) -> dict:
     finally:
         conn.close()
     extra = json.loads(row["result"]) if row["result"] and row["result"].startswith('{"client_key"') else {}
+    session_id = row["session_id"]
+    if row["source"] == "iphone-daily" and session_id is None:
+        session_id = daily_session(cfg)
     if not part.exists() or part.stat().st_size != row["length"]:
         result = {"status": "failed", "item_id": None, "message": "Envio interrompido; envie de novo."}
     else:
         try:
-            result = ingestor.ingest(part, filename=row["filename"], source=row["source"], session_id=row["session_id"],
+            result = ingestor.ingest(part, filename=row["filename"], source=row["source"], session_id=session_id,
                                      client_modified=row["client_modified"], client_sha=row["client_sha256"],
                                      actor=row["source"], client_key=extra.get("client_key"))
         except Exception as exc:
