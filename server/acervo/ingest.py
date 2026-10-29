@@ -9,9 +9,15 @@
                          ▼
                     item + file rows and the move into entrada/, in ONE transaction
 
+"Already known" only counts when the known bytes are really safe (server copy
+on disk, or a healthy verified copy on a drive, or deliberately discarded).
+If the catalog knows the hash but the server copy vanished, the new upload
+REPAIRS it instead of being thrown away.
+
 Concurrency: a per-hash lock serialises two clients sending the same bytes at
 the same time (the second one gets "já existe"); the UNIQUE(sha256)
-constraints are the final arbiter.
+constraints are the final arbiter. Names are chosen inside the write
+transaction, so two different files with the same name never collide.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from typing import Iterator
 from . import db, media
 from .catalog import (
     free_rel_path,
+    library_dir,
     local_now,
     log_event,
     ms_to_local,
@@ -47,8 +54,50 @@ STATUS_MESSAGES = {
     "duplicate": "Já estava no acervo",
     "in_trash": "Está na lixeira — quer restaurar?",
     "discarded": "Você já tinha descartado este arquivo",
+    "restored": "Recuperado: a cópia guardada tinha sumido ou estava com problema",
     "failed": "Falhou",
 }
+
+# A drive copy counts only if it was verified, never failed a later health
+# check, and its drive is not flagged with problems.
+HEALTHY_DRIVE_COPY = """
+    SELECT 1 FROM volume_copies vc JOIN volumes v ON v.id = vc.volume_id
+    WHERE vc.file_id = ? AND vc.verified_at IS NOT NULL
+      AND coalesce(vc.last_check_ok, 1) = 1 AND v.status <> 'problem'
+"""
+
+
+def server_copy_ok(cfg: Config, root: str, rel_path: str | None) -> bool:
+    if rel_path is None:
+        return False
+    try:
+        return (cfg.root_dir(root) / rel_path).is_file()
+    except ValueError:  # microSD root no longer configured
+        return False
+
+
+def stored_safely(cfg: Config, conn: sqlite3.Connection, f: sqlite3.Row) -> bool:
+    """Are these bytes really kept somewhere? (f: files row joined with items.state)"""
+    if server_copy_ok(cfg, f["root"], f["rel_path"]):
+        return True
+    if f["state"] == "purged":
+        return True  # the owner discarded it on purpose; nothing to keep
+    return conn.execute(HEALTHY_DRIVE_COPY, (f["file_id"],)).fetchone() is not None
+
+
+def valid_session(conn: sqlite3.Connection, session_id: int | None) -> int | None:
+    """A stale session id (e.g. saved in a Shortcut) must not break uploads."""
+    if session_id is None:
+        return None
+    return session_id if conn.execute("SELECT 1 FROM upload_sessions WHERE id = ?", (session_id,)).fetchone() else None
+
+
+KNOWN_SQL = """
+    SELECT f.id AS file_id, f.role, f.rel_path, f.root, i.id AS item_id, i.state, i.kind,
+           i.captured_at, v.name AS volume_name
+    FROM files f JOIN items i ON i.id = f.item_id LEFT JOIN volumes v ON v.id = i.volume_id
+    WHERE f.sha256 = ?
+"""
 
 
 def normalize_client_time(value: object) -> int | None:
@@ -130,18 +179,22 @@ class Ingestor:
     def __init__(self, cfg: Config, exiftool: media.ExifTool | None) -> None:
         self.cfg = cfg
         self.exiftool = exiftool
-        self._locks: dict[str, threading.Lock] = {}
+        self._locks: dict[str, list] = {}  # sha -> [lock, users]
         self._guard = threading.Lock()
 
     @contextmanager
     def _sha_lock(self, sha: str) -> Iterator[None]:
         with self._guard:
-            lock = self._locks.setdefault(sha, threading.Lock())
-        with lock:
-            yield
-        with self._guard:
-            if not lock.locked():
-                self._locks.pop(sha, None)
+            entry = self._locks.setdefault(sha, [threading.Lock(), 0])
+            entry[1] += 1
+        try:
+            with entry[0]:
+                yield
+        finally:
+            with self._guard:
+                entry[1] -= 1
+                if entry[1] == 0:
+                    self._locks.pop(sha, None)
 
     def ingest(self, tmp: Path, *, filename: str, source: str, session_id: int | None = None,
                client_modified: object = None, client_sha: str | None = None,
@@ -155,7 +208,7 @@ class Ingestor:
             conn = db.connect(self.cfg.db_path)
             try:
                 with transaction(conn):
-                    count_failure(conn, session_id)
+                    count_failure(conn, valid_session(conn, session_id))
             finally:
                 conn.close()
             return {"status": "failed", "item_id": None, "sha256": sha,
@@ -164,20 +217,22 @@ class Ingestor:
         with self._sha_lock(sha):
             conn = db.connect(self.cfg.db_path)
             try:
-                known = conn.execute(
-                    "SELECT i.id AS item_id, i.state, v.name AS volume_name FROM files f "
-                    "JOIN items i ON i.id = f.item_id LEFT JOIN volumes v ON v.id = i.volume_id "
-                    "WHERE f.sha256 = ?", (sha,)
-                ).fetchone()
+                session_id = valid_session(conn, session_id)
+                known = conn.execute(KNOWN_SQL, (sha,)).fetchone()
                 if known:
-                    return self._already_known(conn, tmp, known, sha, size, filename, client_ms, session_id, client_key)
+                    return self._already_known(conn, tmp, known, sha, size, filename, client_ms, session_id,
+                                               client_key, actor)
                 return self._new(conn, tmp, sha, size, filename, source, session_id, client_ms, actor, client_key)
             finally:
                 conn.close()
 
-    # -- duplicates ------------------------------------------------------------------------
+    # -- content already in the catalog ----------------------------------------------------
 
-    def _already_known(self, conn, tmp, known, sha, size, filename, client_ms, session_id, client_key) -> dict:
+    def _already_known(self, conn, tmp, known, sha, size, filename, client_ms, session_id, client_key, actor) -> dict:
+        damaged = server_copy_ok(self.cfg, known["root"], known["rel_path"]) and \
+            sha256_file(self.cfg.root_dir(known["root"]) / known["rel_path"]) != sha
+        if damaged or not stored_safely(self.cfg, conn, known):
+            return self._repair(conn, tmp, known, sha, size, filename, client_ms, session_id, client_key, actor)
         with transaction(conn):
             conn.execute(
                 "INSERT INTO dedupe_hits (session_id, item_id, layer, original_name) VALUES (?, ?, 3, ?)",
@@ -185,13 +240,39 @@ class Ingestor:
             )
             self._fingerprint(conn, filename, client_ms, size, known["item_id"])
             count_in_session(conn, session_id, sha, "existing", size, client_key)
-        # Identical bytes (same SHA-256) are already in the catalog: the new copy is redundant.
+        # Identical bytes (same SHA-256) are safely stored already: the new copy is redundant.
         tmp.unlink(missing_ok=True)
         status = {"trash": "in_trash", "purged": "discarded"}.get(known["state"], "duplicate")
         message = STATUS_MESSAGES[status]
         if known["state"] == "archived" and known["volume_name"]:
             message = f"Já está no {known['volume_name']}"
         return {"status": status, "item_id": known["item_id"], "sha256": sha, "message": message}
+
+    def _repair(self, conn, tmp, known, sha, size, filename, client_ms, session_id, client_key, actor) -> dict:
+        """The catalog knows these bytes but no safe copy exists: keep the new upload."""
+        with transaction(conn):
+            if known["rel_path"] is not None:
+                root, rel = known["root"], known["rel_path"]  # put it back where the catalog says
+            else:  # archived, but every drive copy failed its health check: back to the Acervo
+                root = "main"
+                directory = library_dir(known["captured_at"], known["kind"])
+                rel = free_rel_path(conn, self.cfg, root, directory, filename_on_drive(conn, known["file_id"], filename))
+                conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (rel, root, known["file_id"]))
+                if known["state"] == "archived":
+                    conn.execute("UPDATE items SET state = 'library' WHERE id = ?", (known["item_id"],))
+            self._fingerprint(conn, filename, client_ms, size, known["item_id"])
+            count_in_session(conn, session_id, sha, "existing", size, client_key)
+            log_event(conn, actor, "repair-from-upload", item_id=known["item_id"], file_id=known["file_id"],
+                      sha256=sha, to_path=f"{root}:{rel}")
+            dest = self.cfg.root_dir(root) / rel
+            if dest.exists():  # present but damaged: keep it aside, never delete it blindly
+                quarantine = self.cfg.subdir("tmp") / "corrompidos" / f"{now_iso()[:19].replace(':', '')}-{dest.name}"
+                quarantine.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(dest, quarantine)
+            move_verified(tmp, dest, sha)
+        log.warning("Arquivo %s recuperado a partir de um novo envio", rel)
+        return {"status": "restored", "item_id": known["item_id"], "sha256": sha,
+                "message": STATUS_MESSAGES["restored"]}
 
     def _fingerprint(self, conn, filename, client_ms, size, item_id) -> None:
         stamp = fingerprint_time(client_ms)
@@ -223,12 +304,13 @@ class Ingestor:
             (captured_at, captured_tz), date_source = local_now(), "upload"
 
         std = standard_name(captured_at, filename)
-        rel = free_rel_path(conn, self.cfg, "main", INBOX_DIR, std)
-        dest = self.cfg.data_dir / rel
         origin_app = media.detect_origin_app(filename)
         screenshot = kind == "photo" and media.looks_like_screenshot(filename, md)
 
         with transaction(conn):
+            # Chosen inside the write transaction: a concurrent upload with the same
+            # name waits here and then sees this file on disk.
+            rel = free_rel_path(conn, self.cfg, "main", INBOX_DIR, std)
             item_id = conn.execute(
                 """INSERT INTO items (sha256, kind, is_live_photo, live_photo_id, mime, size_bytes,
                        captured_at, captured_tz, date_source, source, upload_session_id, original_name,
@@ -273,16 +355,18 @@ class Ingestor:
                     add_suggestion(conn, "burst", md.burst_id, [*others, item_id])
 
             # Last step inside the transaction: if the move fails, nothing is recorded.
-            move_verified(tmp, dest, sha)
+            move_verified(tmp, self.cfg.data_dir / rel, sha)
 
         return {"status": "new", "item_id": item_id, "sha256": sha, "message": STATUS_MESSAGES["new"]}
 
     def _attach_live_video(self, conn, tmp, sha, size, filename, md, session_id, client_ms, actor, client_key) -> dict | None:
+        # Only to a photo still on the server and not discarded: a video for a photo in
+        # the trash becomes its own item in the Entrada instead (never purged on arrival).
         photo = conn.execute(
             """SELECT i.id, f.rel_path, f.root FROM items i
                JOIN files f ON f.item_id = i.id AND f.role = 'original'
                WHERE i.live_photo_id = ? AND i.kind = 'photo' AND f.rel_path IS NOT NULL
-                 AND i.state IN ('inbox', 'library', 'trash')
+                 AND i.state IN ('inbox', 'library')
                  AND NOT EXISTS (SELECT 1 FROM files x WHERE x.item_id = i.id AND x.role = 'live-video')""",
             (md.live_photo_id,),
         ).fetchone()
@@ -292,8 +376,8 @@ class Ingestor:
         stem = photo_name.rsplit(".", 1)[0]
         ext = media.ext_of(filename) or "mov"
         original_ext = filename.rsplit(".", 1)[1] if "." in filename else "MOV"
-        rel = free_rel_path(conn, self.cfg, photo["root"], directory, f"{stem}.{original_ext}")
         with transaction(conn):
+            rel = free_rel_path(conn, self.cfg, photo["root"], directory, f"{stem}.{original_ext}")
             file_id = conn.execute(
                 "INSERT INTO files (item_id, role, sha256, size_bytes, mime, ext, rel_path, root) "
                 "VALUES (?, 'live-video', ?, ?, ?, ?, ?, ?)",
@@ -312,27 +396,45 @@ class Ingestor:
         return {"status": "attached", "item_id": photo["id"], "sha256": sha, "message": STATUS_MESSAGES["attached"]}
 
 
+def filename_on_drive(conn: sqlite3.Connection, file_id: int, fallback: str) -> str:
+    row = conn.execute("SELECT rel_path FROM volume_copies WHERE file_id = ? ORDER BY id LIMIT 1", (file_id,)).fetchone()
+    return row[0].rsplit("/", 1)[-1] if row else fallback
+
+
 # --- crash recovery ---------------------------------------------------------------------------
 
-SKIP_SUFFIXES = (".part", ".tmp")
+SKIP_SUFFIXES = (".tmp",)
+PARTIAL_SUFFIX = ".part"
 _STANDARD_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{4}_(.+)$")
 
 
 def reconcile(cfg: Config, ingestor: Ingestor) -> dict:
     """Bring disk and catalog back in agreement after a crash. Idempotent.
 
+    Must not run while another process changes the data dir: the server runs it
+    at start-up before serving requests; `acervo verificar` refuses to run while
+    the server holds the data-dir lock.
+
     For every file under entrada/, acervo/ and lixeira/ that the catalog does
-    not point to:
+    not point to (checked again, file by file, right before acting):
+      * '.part' files are unfinished copies whose source still exists: removed;
       * same SHA-256 as a cataloged file whose recorded path is missing
         -> the move happened but the catalog update did not: fix the path;
-      * same SHA-256 as a file that is safely stored elsewhere (another path,
-        or verified on a drive, or purged) -> redundant identical copy: remove;
-      * unknown content -> ingest it into the Entrada (never lose bytes).
+      * same SHA-256 as a recorded copy that is intact (its hash is re-read)
+        or as content safely on a drive / purged -> redundant copy: removed;
+      * same SHA-256 as a recorded copy that turned out CORRUPTED -> the
+        damaged one goes to tmp/corrompidos/ and this one takes its place;
+      * unknown content -> ingested into the Entrada (never lose bytes).
+    Files left in tmp/ by an interrupted reconcile are ingested too.
     """
-    report = {"fixed_paths": 0, "removed_copies": 0, "reingested": 0, "missing": 0}
+    report = {"fixed_paths": 0, "removed_copies": 0, "reingested": 0, "repaired": 0,
+              "partials_removed": 0, "missing": 0}
     conn = db.connect(cfg.db_path)
     try:
-        known_paths = {(r[0], r[1]) for r in conn.execute("SELECT root, rel_path FROM files WHERE rel_path IS NOT NULL")}
+        for leftover in sorted(cfg.subdir("tmp").glob("reconcile-*")):
+            if leftover.is_file():
+                ingestor.ingest(leftover, filename=leftover.name.split("-", 2)[-1], source="web", actor="reconcile")
+                report["reingested"] += 1
         roots = [("main", cfg.data_dir)] + ([("sd", cfg.sd_dir)] if cfg.sd_dir and cfg.sd_dir.is_dir() else [])
         for root, base in roots:
             for top in (INBOX_DIR, LIBRARY_DIR, TRASH_DIR):
@@ -341,59 +443,83 @@ def reconcile(cfg: Config, ingestor: Ingestor) -> dict:
                     continue
                 for dirpath, _dirs, names in os.walk(folder):
                     for name in names:
+                        path = Path(dirpath) / name
+                        if name.endswith(PARTIAL_SUFFIX):
+                            path.unlink(missing_ok=True)
+                            report["partials_removed"] += 1
+                            continue
                         if name.endswith(SKIP_SUFFIXES) or name.startswith("."):
                             continue
-                        path = Path(dirpath) / name
-                        rel = path.relative_to(base).as_posix()
-                        if (root, rel) in known_paths:
-                            continue
-                        _reconcile_one(cfg, conn, ingestor, root, rel, path, report)
+                        _reconcile_one(cfg, conn, ingestor, root, path.relative_to(base).as_posix(), path, report)
         for r in conn.execute("SELECT root, rel_path FROM files WHERE rel_path IS NOT NULL"):
             base = cfg.data_dir if r[0] == "main" else cfg.sd_dir
             if base is not None and not (base / r[1]).exists():
                 report["missing"] += 1
     finally:
         conn.close()
-    if any(report[k] for k in ("fixed_paths", "removed_copies", "reingested")):
+    if any(v for k, v in report.items() if k != "missing"):
         log.warning("Reconciliação: %s", report)
     return report
 
 
 def _reconcile_one(cfg, conn, ingestor, root, rel, path, report) -> None:
+    # The catalog may have changed since the walk started: look again, now.
+    if conn.execute("SELECT 1 FROM files WHERE root = ? AND rel_path = ?", (root, rel)).fetchone():
+        return
+    if not path.is_file():
+        return
     sha = sha256_file(path)
-    row = conn.execute(
-        "SELECT f.id, f.item_id, f.rel_path, f.root, i.state, "
-        "EXISTS (SELECT 1 FROM volume_copies vc WHERE vc.file_id = f.id AND vc.verified_at IS NOT NULL) AS on_drive "
-        "FROM files f JOIN items i ON i.id = f.item_id WHERE f.sha256 = ?", (sha,)
-    ).fetchone()
+    row = conn.execute(KNOWN_SQL, (sha,)).fetchone()
     if row is None:
-        tmp = cfg.subdir("tmp") / f"reconcile-{sha[:16]}"
+        tmp = cfg.subdir("tmp") / f"reconcile-{sha[:16]}-{path.name}"
         move_verified(path, tmp, sha)
         m = _STANDARD_NAME.match(path.name)
         ingestor.ingest(tmp, filename=m.group(1) if m else path.name, source="web", actor="reconcile")
         report["reingested"] += 1
         return
-    recorded_exists = row["rel_path"] is not None and (cfg.root_dir(row["root"]) / row["rel_path"]).exists()
-    if row["rel_path"] is not None and not recorded_exists:
+
+    if row["rel_path"] is not None:
+        recorded = cfg.root_dir(row["root"]) / row["rel_path"]
+        if not recorded.is_file():
+            with transaction(conn):
+                conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (rel, root, row["file_id"]))
+                log_event(conn, "reconcile", "fix-path", item_id=row["item_id"], file_id=row["file_id"], sha256=sha,
+                          from_path=row["rel_path"], to_path=rel)
+            report["fixed_paths"] += 1
+            return
+        if sha256_file(recorded) == sha:
+            with transaction(conn):  # verified identical to the intact recorded copy
+                log_event(conn, "reconcile", "remove-redundant-copy", item_id=row["item_id"],
+                          file_id=row["file_id"], sha256=sha, from_path=rel)
+            path.unlink()
+            report["removed_copies"] += 1
+            return
+        # The recorded copy is damaged; this one is the good one.
+        quarantine = cfg.subdir("tmp") / "corrompidos" / f"{now_iso()[:19].replace(':', '')}-{recorded.name}"
+        quarantine.parent.mkdir(parents=True, exist_ok=True)
         with transaction(conn):
-            conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (rel, root, row["id"]))
-            log_event(conn, "reconcile", "fix-path", item_id=row["item_id"], file_id=row["id"], sha256=sha,
-                      from_path=row["rel_path"], to_path=rel)
-        report["fixed_paths"] += 1
+            log_event(conn, "reconcile", "repair-corrupted-copy", item_id=row["item_id"], file_id=row["file_id"],
+                      sha256=sha, from_path=rel, to_path=row["rel_path"],
+                      details={"quarantine": str(quarantine)})
+            os.replace(recorded, quarantine)
+            move_verified(path, recorded, sha)
+        report["repaired"] += 1
         return
-    if recorded_exists or row["on_drive"] or row["state"] == "purged":
-        # Verified identical (same SHA-256) to content that is safely stored: drop this copy.
-        with transaction(conn):
-            log_event(conn, "reconcile", "remove-redundant-copy", item_id=row["item_id"], file_id=row["id"],
+
+    if stored_safely(cfg, conn, row):
+        with transaction(conn):  # identical to content safely on a drive, or purged on purpose
+            log_event(conn, "reconcile", "remove-redundant-copy", item_id=row["item_id"], file_id=row["file_id"],
                       sha256=sha, from_path=rel)
         path.unlink()
         report["removed_copies"] += 1
         return
-    # Catalog says the bytes left the server but no verified copy exists: keep this one.
+    # The catalog says the bytes left the server, but no healthy copy exists: keep this one.
     with transaction(conn):
-        conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (rel, root, row["id"]))
-        log_event(conn, "reconcile", "fix-path", item_id=row["item_id"], file_id=row["id"], sha256=sha, to_path=rel)
+        conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (rel, root, row["file_id"]))
+        if row["state"] == "archived":
+            conn.execute("UPDATE items SET state = 'library' WHERE id = ?", (row["item_id"],))
+        log_event(conn, "reconcile", "fix-path", item_id=row["item_id"], file_id=row["file_id"], sha256=sha, to_path=rel)
     report["fixed_paths"] += 1
 
 
-__all__ = ["Ingestor", "reconcile", "normalize_client_time", "fingerprint_time", "now_iso"]
+__all__ = ["Ingestor", "reconcile", "normalize_client_time", "fingerprint_time", "stored_safely", "now_iso"]

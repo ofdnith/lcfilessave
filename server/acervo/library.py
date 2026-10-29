@@ -13,7 +13,7 @@ import logging
 import sqlite3
 
 from . import db
-from .catalog import free_rel_path, iso_in, library_dir, log_event, now_iso, preview_path, thumb_path, transaction
+from .catalog import free_rel_path, iso_in, library_dir, log_event, now_iso, preview_path, transaction
 from .config import INBOX_DIR, TRASH_DIR, Config
 from .storage import disk_usage, move_verified
 
@@ -42,15 +42,30 @@ def _files(conn: sqlite3.Connection, item_id: int) -> list[sqlite3.Row]:
 
 def _move_files(cfg: Config, conn: sqlite3.Connection, item: sqlite3.Row, root: str, directory: str,
                 action: str, actor: str) -> None:
-    for f in _files(conn, item["id"]):
-        if f["rel_path"] is None:
-            raise ActionError("O original não está no servidor.")
-        name = f["rel_path"].rsplit("/", 1)[1]
-        new_rel = free_rel_path(conn, cfg, root, directory, name)
-        conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (new_rel, root, f["id"]))
-        log_event(conn, actor, action, item_id=item["id"], file_id=f["id"], sha256=f["sha256"],
-                  from_path=f"{f['root']}:{f['rel_path']}", to_path=f"{root}:{new_rel}")
-        move_verified(cfg.root_dir(f["root"]) / f["rel_path"], cfg.root_dir(root) / new_rel, f["sha256"])
+    """Called inside a transaction. If any file fails to move (a Live Photo has two),
+    the ones already moved are moved back before the transaction rolls back, so
+    disk and catalog never disagree."""
+    files = _files(conn, item["id"])
+    if any(f["rel_path"] is None for f in files):
+        raise ActionError("O original não está no servidor.")
+    done: list[tuple] = []
+    try:
+        for f in files:
+            name = f["rel_path"].rsplit("/", 1)[1]
+            new_rel = free_rel_path(conn, cfg, root, directory, name)
+            conn.execute("UPDATE files SET rel_path = ?, root = ? WHERE id = ?", (new_rel, root, f["id"]))
+            log_event(conn, actor, action, item_id=item["id"], file_id=f["id"], sha256=f["sha256"],
+                      from_path=f"{f['root']}:{f['rel_path']}", to_path=f"{root}:{new_rel}")
+            src, dst = cfg.root_dir(f["root"]) / f["rel_path"], cfg.root_dir(root) / new_rel
+            move_verified(src, dst, f["sha256"])
+            done.append((src, dst, f["sha256"]))
+    except BaseException:
+        for src, dst, sha in reversed(done):
+            try:
+                move_verified(dst, src, sha)
+            except OSError:
+                log.exception("Não consegui desfazer a movimentação de %s; a verificação corrige no próximo início", dst)
+        raise
 
 
 def _item(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row:
@@ -138,8 +153,7 @@ def purge_expired(cfg: Config, actor: str = "server") -> int:
             for f in files:
                 if f["rel_path"]:
                     (cfg.root_dir(f["root"]) / f["rel_path"]).unlink(missing_ok=True)
-            thumb_path(cfg, row["sha256"]).unlink(missing_ok=True)
-            preview_path(cfg, row["sha256"]).unlink(missing_ok=True)
+            preview_path(cfg, row["sha256"]).unlink(missing_ok=True)  # cache; thumbnails are never deleted
             purged += 1
     finally:
         conn.close()
@@ -179,7 +193,7 @@ def apply_action(cfg: Config, item_ids: list[int], action: str, actor: str = "we
                 else:
                     set_important(conn, iid, action == "important")
                 ok.append(iid)
-            except (ActionError, OSError, sqlite3.Error) as exc:
+            except (ActionError, OSError, sqlite3.Error, ValueError) as exc:
                 log.warning("Ação %s falhou no item %s: %s", action, iid, exc)
                 failed.append({"id": iid, "error": str(exc) if isinstance(exc, ActionError) else "Falha ao mover o arquivo."})
         resolve_suggestions(conn)

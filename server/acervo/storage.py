@@ -28,6 +28,24 @@ EXTRA_DIRS = (PREVIEWS_DIR, GEO_DIR, f"{TMP_DIR}/uploads")
 CHUNK = 1024 * 1024
 
 
+class DataDirBusy(RuntimeError):
+    pass
+
+
+def lock_data_dir(cfg: Config):
+    """Exclusive lock on the data dir, held by the running server. Commands that
+    rearrange files (acervo verificar/processar) refuse to run alongside it."""
+    import fcntl
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    fh = open(cfg.data_dir / ".acervo.lock", "a+")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise DataDirBusy("O servidor do Acervo está rodando nesta pasta. Pare-o antes (acervo-ctl stop).") from None
+    return fh
+
+
 def ensure_layout(cfg: Config) -> None:
     """Create the data dir and its subfolders. Never removes anything."""
     cfg.data_dir.mkdir(parents=True, exist_ok=True)

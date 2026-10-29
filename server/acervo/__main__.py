@@ -139,6 +139,12 @@ def main(argv: list[str] | None = None) -> int:
         from .ingest import Ingestor, reconcile
         from .jobs import Worker
         from .places import Gazetteer
+        from .storage import DataDirBusy, lock_data_dir
+        try:
+            lock = lock_data_dir(cfg)
+        except DataDirBusy as exc:
+            print(exc, file=sys.stderr)
+            return 1
         exiftool = media.ExifTool()
         try:
             if args.command == "verificar":
@@ -149,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{worker.run_pending()} tarefas processadas.")
         finally:
             exiftool.close()
+            lock.close()
         return 0
 
     # serve

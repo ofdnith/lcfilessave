@@ -71,6 +71,8 @@ def app_token(request: Request) -> dict:
     cfg = request.app.state.config
     conn = db.connect(cfg.db_path)
     try:
+        if not auth.password_set(conn):
+            raise HTTPException(409, "Defina uma senha no servidor antes (acervo senha).")
         with transaction(conn):
             token = auth.create_token(conn, "api", "App do Mac")
     finally:

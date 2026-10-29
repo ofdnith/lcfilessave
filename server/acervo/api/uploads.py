@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import auth, db, media
 from ..catalog import now_iso, set_setting, transaction
-from ..ingest import count_in_session, fingerprint_time, normalize_client_time
+from ..ingest import KNOWN_SQL, count_in_session, fingerprint_time, normalize_client_time, stored_safely, valid_session
 from ..storage import disk_usage
 
 router = APIRouter(prefix="/api", dependencies=[Depends(auth.require_auth)])
@@ -69,6 +69,13 @@ def session_json(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
             _plural(row["existing_count"], "já existia", "já existiam"),
             _plural(row["near_dup_count"], "quase-duplicado para revisar", "quase-duplicados para revisar"),
         ])
+    # Files the owner had discarded before count as handled (that was their decision),
+    # but are reported apart so "verificados" never hides them.
+    data["discarded_count"] = conn.execute(
+        "SELECT count(*) FROM session_files sf JOIN files f ON f.sha256 = sf.sha256 JOIN items i ON i.id = f.item_id "
+        "WHERE sf.session_id = ? AND i.state IN ('trash', 'purged')", (row["id"],)).fetchone()[0]
+    if data["discarded_count"] and row["source"] != "iphone-daily":
+        data["summary_text"] += " · " + _plural(data["discarded_count"], "descartado antes", "descartados antes")
     data["safe_to_delete"] = bool(row["expected_count"]) and row["received_verified_count"] >= row["expected_count"]
     return data
 
@@ -141,22 +148,24 @@ class PrecheckBody(BaseModel):
 
 @router.post("/precheck")
 def precheck(body: PrecheckBody, request: Request) -> dict:
+    cfg = request.app.state.config
     conn = _conn(request)
     results = []
     try:
         with transaction(conn):
+            session_id = valid_session(conn, body.session_id)
             for e in body.entries:
                 res = {"key": e.key, "known": False, "by": None, "state": None, "item_id": None, "verified": False}
                 if e.sha256:
-                    row = conn.execute(
-                        "SELECT i.id, i.state, f.size_bytes FROM files f JOIN items i ON i.id = f.item_id "
-                        "WHERE f.sha256 = ?", (e.sha256.lower(),)).fetchone()
-                    if row:
-                        res.update(known=True, by="hash", state=row["state"], item_id=row["id"], verified=True)
-                        count_in_session(conn, body.session_id, e.sha256.lower(), "existing", 0, e.key)
-                        if body.session_id:
+                    row = conn.execute(KNOWN_SQL, (e.sha256.lower(),)).fetchone()
+                    # "Known" only if the bytes are really safe; otherwise the client must
+                    # send them again (and the upload repairs the catalog).
+                    if row and stored_safely(cfg, conn, row):
+                        res.update(known=True, by="hash", state=row["state"], item_id=row["item_id"], verified=True)
+                        count_in_session(conn, session_id, e.sha256.lower(), "existing", 0, e.key)
+                        if session_id:
                             conn.execute("INSERT INTO dedupe_hits (session_id, item_id, layer, original_name) "
-                                         "VALUES (?, ?, 2, ?)", (body.session_id, row["id"], e.name))
+                                         "VALUES (?, ?, 2, ?)", (session_id, row["item_id"], e.name))
                 elif e.name and e.size is not None and e.created_at is not None:
                     stamp = fingerprint_time(normalize_client_time(e.created_at))
                     row = conn.execute(
@@ -165,9 +174,9 @@ def precheck(body: PrecheckBody, request: Request) -> dict:
                         (e.name, stamp, e.size)).fetchone() if stamp else None
                     if row:
                         res.update(known=True, by="fingerprint", state=row["state"], item_id=row["id"])
-                        if body.session_id:
+                        if session_id:
                             conn.execute("INSERT INTO dedupe_hits (session_id, item_id, layer, original_name) "
-                                         "VALUES (?, ?, 1, ?)", (body.session_id, row["id"], e.name))
+                                         "VALUES (?, ?, 1, ?)", (session_id, row["id"], e.name))
                 results.append(res)
     finally:
         conn.close()
@@ -216,7 +225,7 @@ def tus_options() -> Response:
 
 
 @router.post("/uploads")
-def tus_create(request: Request) -> Response:
+async def tus_create(request: Request) -> Response:
     try:
         length = int(request.headers["upload-length"])
     except (KeyError, ValueError):
@@ -245,6 +254,13 @@ def tus_create(request: Request) -> Response:
              json.dumps({"client_key": meta.get("client_key")}) if meta.get("client_key") else None))
     finally:
         conn.close()
+    if length == 0:  # tus clients never PATCH an empty file: finish it now
+        conn = _conn(request)
+        try:
+            row = _upload(conn, upload_id)
+        finally:
+            conn.close()
+        await _finish_tus(request, row, _uploads_dir(request) / f"{upload_id}.part")
     return Response(status_code=201, headers={**TUS_HEADERS, "Location": f"/api/uploads/{upload_id}"})
 
 
@@ -284,6 +300,8 @@ async def tus_patch(upload_id: str, request: Request) -> Response:
     except (KeyError, ValueError):
         raise HTTPException(400, "Upload-Offset obrigatório", headers=TUS_HEADERS) from None
 
+    # Locks are never removed while the process lives (a few bytes each): removing
+    # one while another request still waits on it would let two PATCHes append at once.
     lock = _patch_locks.setdefault(upload_id, asyncio.Lock())
     async with lock:
         conn = _conn(request)
@@ -314,9 +332,11 @@ async def tus_patch(upload_id: str, request: Request) -> Response:
             raise HTTPException(507 if exc.errno == 28 else 500, "Falha ao gravar no servidor", headers=TUS_HEADERS) from None
         finally:
             await run_in_threadpool(fh.close)
-        offset = row["length"] - remaining
+        offset = part.stat().st_size  # the disk is the truth
+        if offset > row["length"]:
+            raise HTTPException(500, "Upload corrompido; envie de novo", headers=TUS_HEADERS)
 
-        if remaining == 0:
+        if offset == row["length"]:
             await _finish_tus(request, row, part)
         else:
             conn = _conn(request)
@@ -324,31 +344,63 @@ async def tus_patch(upload_id: str, request: Request) -> Response:
                 conn.execute("UPDATE uploads SET updated_at = ? WHERE id = ?", (now_iso(), upload_id))
             finally:
                 conn.close()
-    _patch_locks.pop(upload_id, None)
     return Response(status_code=204, headers={**TUS_HEADERS, "Upload-Offset": str(offset)})
 
 
-async def _finish_tus(request: Request, row: sqlite3.Row, part: Path) -> None:
-    conn = _conn(request)
+def finish_upload(cfg, ingestor, row: sqlite3.Row, part: Path) -> dict:
+    """Ingest a fully received tus upload and store the result. Safe to run again
+    after a crash: if the bytes were already ingested, the .part is gone and the
+    client is told to re-send (it then gets "já existe")."""
+    conn = db.connect(cfg.db_path)
     try:
         conn.execute("UPDATE uploads SET status = 'processing', updated_at = ? WHERE id = ?", (now_iso(), row["id"]))
     finally:
         conn.close()
-    extra = json.loads(row["result"]) if row["result"] else {}
-    try:
-        result = await _ingest(request, part, filename=row["filename"], source=row["source"],
-                               session_id=row["session_id"], client_modified=row["client_modified"],
-                               client_sha=row["client_sha256"], client_key=extra.get("client_key"))
-    except Exception as exc:
-        part.unlink(missing_ok=True)  # the client starts this file again from zero
-        result = {"status": "failed", "item_id": None, "message": f"Erro ao processar: {exc}"}
-    conn = _conn(request)
+    extra = json.loads(row["result"]) if row["result"] and row["result"].startswith('{"client_key"') else {}
+    if not part.exists() or part.stat().st_size != row["length"]:
+        result = {"status": "failed", "item_id": None, "message": "Envio interrompido; envie de novo."}
+    else:
+        try:
+            result = ingestor.ingest(part, filename=row["filename"], source=row["source"], session_id=row["session_id"],
+                                     client_modified=row["client_modified"], client_sha=row["client_sha256"],
+                                     actor=row["source"], client_key=extra.get("client_key"))
+        except Exception as exc:
+            part.unlink(missing_ok=True)  # the client starts this file again from zero
+            result = {"status": "failed", "item_id": None, "message": f"Erro ao processar: {exc}"}
+    conn = db.connect(cfg.db_path)
     try:
         conn.execute("UPDATE uploads SET status = ?, result = ?, updated_at = ? WHERE id = ?",
                      ("failed" if result["status"] == "failed" else "done", json.dumps(result, ensure_ascii=False),
                       now_iso(), row["id"]))
     finally:
         conn.close()
+    return result
+
+
+def recover_uploads(cfg, ingestor) -> int:
+    """At start-up: finish uploads interrupted between the last byte and the result."""
+    conn = db.connect(cfg.db_path)
+    try:
+        rows = conn.execute("SELECT * FROM uploads WHERE status IN ('processing', 'receiving')").fetchall()
+    finally:
+        conn.close()
+    n = 0
+    for row in rows:
+        part = cfg.subdir("tmp") / "uploads" / f"{row['id']}.part"
+        complete = part.exists() and part.stat().st_size == row["length"]
+        if row["status"] == "processing" or complete:
+            finish_upload(cfg, ingestor, row, part)
+            n += 1
+    return n
+
+
+async def _finish_tus(request: Request, row: sqlite3.Row, part: Path) -> None:
+    state = request.app.state
+    try:
+        await run_in_threadpool(finish_upload, state.config, state.ingestor, row, part)
+    finally:
+        if getattr(state, "worker", None):
+            state.worker.wake()
 
 
 @router.delete("/uploads/{upload_id}")
