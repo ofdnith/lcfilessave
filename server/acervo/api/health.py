@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import __version__, db
+from .. import __version__, db, media
 from ..config import Config
 from ..storage import disk_usage, missing_or_unwritable
 
@@ -46,13 +46,27 @@ def health(request: Request) -> JSONResponse:
         "alert": usage.used_pct >= cfg.storage_alert_pct,
     }
 
+    report = getattr(request.app.state, "reconcile_report", {}) or {}
+    if report.get("missing"):
+        problems.append(f"{report['missing']} arquivos do catálogo não foram encontrados no disco")
+
     ok = not problems
+    gaz = getattr(request.app.state, "gazetteer", None)
+    tools = {
+        "exiftool": media.have("exiftool"),
+        "ffmpeg": media.have("ffmpeg"),
+        "heic": media.HEIF_OK,
+        "pdf": media.have("pdftotext"),
+        "ocr": media.have("tesseract"),
+        "cities": bool(gaz and gaz.available),
+    }
     body = {
         "status": "ok" if ok else "degraded",
         "version": __version__,
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "catalog": catalog,
         "storage": storage,
+        "tools": tools,
         "problems": problems,
     }
     return JSONResponse(body, status_code=200 if ok else 503)

@@ -1,22 +1,41 @@
-"""Data directory layout and disk usage."""
+"""Data directory layout, disk usage and safe file operations.
+
+Every function that moves or deletes bytes lives here, so the safety rules
+(fsync, hash check before deleting a source) are implemented once.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import INBOX_DIR, LIBRARY_DIR, THUMBS_DIR, TMP_DIR, TRASH_DIR, Config
+from .config import (
+    GEO_DIR,
+    INBOX_DIR,
+    LIBRARY_DIR,
+    PREVIEWS_DIR,
+    THUMBS_DIR,
+    TMP_DIR,
+    TRASH_DIR,
+    Config,
+)
 
 LAYOUT = (INBOX_DIR, LIBRARY_DIR, TRASH_DIR, THUMBS_DIR, TMP_DIR)
+EXTRA_DIRS = (PREVIEWS_DIR, GEO_DIR, f"{TMP_DIR}/uploads")
+CHUNK = 1024 * 1024
 
 
 def ensure_layout(cfg: Config) -> None:
     """Create the data dir and its subfolders. Never removes anything."""
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    for name in LAYOUT:
-        cfg.subdir(name).mkdir(exist_ok=True)
+    for name in (*LAYOUT, *EXTRA_DIRS):
+        cfg.subdir(name).mkdir(parents=True, exist_ok=True)
+    if cfg.sd_dir is not None and cfg.sd_dir.is_dir():
+        for name in (LIBRARY_DIR, TRASH_DIR):
+            (cfg.sd_dir / name).mkdir(exist_ok=True)
 
 
 def missing_or_unwritable(cfg: Config) -> list[str]:
@@ -26,6 +45,8 @@ def missing_or_unwritable(cfg: Config) -> list[str]:
             problems.append(f"{path} não existe")
         elif not os.access(path, os.W_OK):
             problems.append(f"{path} sem permissão de escrita")
+    if cfg.sd_dir is not None and not cfg.sd_dir.is_dir():
+        problems.append(f"cartão microSD não encontrado em {cfg.sd_dir}")
     return problems
 
 
@@ -46,3 +67,74 @@ def disk_usage(path: Path) -> DiskUsage:
     # used + free < total. What we can actually still write is `free`, so the
     # percentage is computed from it.
     return DiskUsage(total_bytes=u.total, used_bytes=u.total - u.free, free_bytes=u.free)
+
+
+# --- hashing and safe moves ----------------------------------------------------
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(CHUNK):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def fsync_dir(path: Path) -> None:
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def fsync_file(path: Path) -> None:
+    with open(path, "rb+") as fh:
+        os.fsync(fh.fileno())
+
+
+class VerificationError(RuntimeError):
+    pass
+
+
+def move_verified(src: Path, dest: Path, expected_sha: str) -> None:
+    """Move src to dest. Same filesystem: atomic rename. Different filesystem
+    (e.g. internal storage -> microSD): copy, fsync, re-read and compare the
+    SHA-256, and only then remove the source (inviolable rule 3)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(src, dest)
+        fsync_dir(dest.parent)
+        return
+    except OSError as exc:
+        if exc.errno != 18:  # EXDEV: cross-device link
+            raise
+    part = dest.with_name(dest.name + ".part")
+    with open(src, "rb") as fin, open(part, "wb") as fout:
+        shutil.copyfileobj(fin, fout, CHUNK)
+        fout.flush()
+        os.fsync(fout.fileno())
+    if sha256_file(part) != expected_sha:
+        part.unlink(missing_ok=True)
+        raise VerificationError(f"cópia de {src.name} não confere; origem mantida")
+    os.replace(part, dest)
+    fsync_dir(dest.parent)
+    src.unlink()
+    fsync_dir(src.parent)
+
+
+def unique_name(directory: Path, name: str, taken: set[str] | None = None) -> str:
+    """'x.jpg' -> 'x.jpg', 'x_2.jpg', 'x_3.jpg'… avoiding files on disk and `taken`."""
+    taken = taken or set()
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    candidate, n = name, 1
+    while (directory / candidate).exists() or candidate in taken:
+        n += 1
+        candidate = f"{stem}_{n}.{ext}" if ext else f"{stem}_{n}"
+    return candidate

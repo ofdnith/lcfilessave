@@ -66,4 +66,4 @@ def test_is_loopback(host, expected):
 def test_serve_refuses_network_host_without_password(tmp_path: Path, capsys):
     (tmp_path / "acervo.toml").write_text('host = "0.0.0.0"\n')
     assert main(["serve"]) == 2
-    assert "Fase 3" in capsys.readouterr().err
+    assert "acervo senha" in capsys.readouterr().err

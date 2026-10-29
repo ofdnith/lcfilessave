@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Acervo · __VOLUME_NAME__</title>
+<!--
+  Este arquivo funciona sozinho, sem internet e sem instalar nada.
+  Abra-o com dois cliques em qualquer computador. Os originais estão nas
+  pastas AAAA/MM/ deste disco; as miniaturas, em .acervo/miniaturas/.
+-->
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b35; --text:#e7e9ee; --muted:#8b93a3; --accent:#7aa2ff; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f7f9; --panel:#fff; --line:#e3e6eb; --text:#16181d; --muted:#5d6573; --accent:#2f5fe0; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { position:sticky; top:0; z-index:2; background:var(--bg); border-bottom:1px solid var(--line); padding:14px 16px; }
+  .top { display:flex; flex-wrap:wrap; gap:10px; align-items:center; max-width:1400px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 12px 0 0; }
+  h1 small { color:var(--muted); font-weight:400; }
+  input[type=search] { flex:1; min-width:180px; padding:9px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font:inherit; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:999px; padding:5px 11px; font:inherit; font-size:13px; cursor:pointer; }
+  .chip[aria-pressed=true] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  main { max-width:1400px; margin:0 auto; padding:8px 16px 60px; }
+  h2 { font-size:14px; color:var(--muted); font-weight:600; margin:22px 0 8px; text-transform:capitalize; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:4px; }
+  .cell { position:relative; aspect-ratio:1; background:var(--panel); border-radius:6px; overflow:hidden; display:block; }
+  .cell img { width:100%; height:100%; object-fit:cover; display:block; }
+  .cell .ph { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:12px; padding:6px; text-align:center; word-break:break-all; }
+  .cell .badge { position:absolute; right:4px; bottom:4px; background:rgba(0,0,0,.6); color:#fff; font-size:11px; border-radius:4px; padding:1px 5px; }
+  .cell .star { position:absolute; left:5px; top:3px; color:#ffd166; text-shadow:0 0 3px #000; }
+  .list a, .others div { display:flex; justify-content:space-between; gap:12px; padding:9px 4px; border-bottom:1px solid var(--line); color:var(--text); text-decoration:none; }
+  .list a:hover { background:var(--panel); }
+  .meta { color:var(--muted); font-size:13px; white-space:nowrap; }
+  .empty { color:var(--muted); padding:40px 0; text-align:center; }
+  .note { color:var(--muted); font-size:13px; margin-top:28px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>Acervo <small>· __VOLUME_NAME__ · <span id="count"></span></small></h1>
+    <input type="search" id="q" placeholder="Buscar por nome, lugar, ano…" autofocus>
+    <div class="chips" id="kinds"></div>
+  </div>
+</header>
+<main id="main"></main>
+<script>
+const DATA = /*__ACERVO_DATA__*/null;
+const KINDS = [["all","Tudo"],["photo","Fotos"],["video","Vídeos"],["document","Documentos"],["audio","Áudios"],["other","Outros"]];
+const MONTHS = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+let kind = "all";
+const norm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const href = p => p.split("/").map(encodeURIComponent).join("/");
+const size = b => b > 1e9 ? (b/1e9).toFixed(1).replace(".", ",") + " GB" : b > 1e6 ? Math.round(b/1e6) + " MB" : Math.max(1, Math.round(b/1e3)) + " KB";
+const when = d => `${d.slice(8,10)}/${d.slice(5,7)}/${d.slice(0,4)}`;
+const items = DATA.items.map(([k, name, date, rel, live, sha, bytes, place, important]) =>
+  ({k, name, date, rel, live, sha, bytes, place, important, text: norm([name, place, date.slice(0,7), date.slice(0,4)].join(" "))}));
+const others = DATA.others.map(([k, name, date, vol]) => ({k, name, date, vol, text: norm(name + " " + date.slice(0,7))}));
+document.getElementById("count").textContent = items.length.toLocaleString("pt-BR") + " itens";
+
+const chips = document.getElementById("kinds");
+for (const [k, label] of KINDS) {
+  const b = Object.assign(document.createElement("button"), {className: "chip", textContent: label});
+  b.setAttribute("aria-pressed", k === kind);
+  b.onclick = () => { kind = k; [...chips.children].forEach(c => c.setAttribute("aria-pressed", c === b)); render(); };
+  chips.append(b);
+}
+
+function cell(it) {
+  const a = document.createElement("a");
+  a.className = "cell"; a.href = href(it.rel); a.target = "_blank";
+  a.title = `${it.name} · ${when(it.date)}${it.place ? " · " + it.place : ""}`;
+  if (it.sha) {
+    const img = new Image(); img.loading = "lazy"; img.alt = it.name;
+    img.src = ".acervo/miniaturas/" + it.sha + ".webp";
+    img.onerror = () => img.replaceWith(Object.assign(document.createElement("div"), {className: "ph", textContent: it.name}));
+    a.append(img);
+  } else a.append(Object.assign(document.createElement("div"), {className: "ph", textContent: it.name}));
+  if (it.k === "video") a.append(Object.assign(document.createElement("span"), {className: "badge", textContent: "vídeo"}));
+  if (it.live) a.append(Object.assign(document.createElement("span"), {className: "badge", textContent: "live"}));
+  if (it.important) a.append(Object.assign(document.createElement("span"), {className: "star", textContent: "★"}));
+  return a;
+}
+
+function row(it) {
+  const a = document.createElement("a");
+  a.href = href(it.rel); a.target = "_blank";
+  a.append(Object.assign(document.createElement("span"), {textContent: it.name}),
+           Object.assign(document.createElement("span"), {className: "meta", textContent: `${when(it.date)} · ${size(it.bytes)}`}));
+  return a;
+}
+
+function render() {
+  const words = norm(document.getElementById("q").value).split(/\s+/).filter(Boolean);
+  const ok = it => (kind === "all" || it.k === kind) && words.every(w => it.text.includes(w));
+  const found = items.filter(ok);
+  const main = document.getElementById("main");
+  main.replaceChildren();
+  if (!found.length) main.append(Object.assign(document.createElement("p"), {className: "empty", textContent: "Nada encontrado neste disco."}));
+  const groups = new Map();
+  for (const it of found) {
+    const key = it.date.slice(0, 7);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  const queue = [...groups];
+  const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) more(); });
+  const sentinel = document.createElement("div");
+  function more() {
+    for (let n = 0; n < 6 && queue.length; n++) {
+      const [ym, list] = queue.shift();
+      main.insertBefore(Object.assign(document.createElement("h2"), {textContent: `${MONTHS[+ym.slice(5,7) - 1]} de ${ym.slice(0,4)}`}), sentinel);
+      const media = list.filter(i => i.k === "photo" || i.k === "video");
+      const docs = list.filter(i => !(i.k === "photo" || i.k === "video"));
+      if (media.length) { const g = document.createElement("div"); g.className = "grid"; media.forEach(i => g.append(cell(i))); main.insertBefore(g, sentinel); }
+      if (docs.length) { const l = document.createElement("div"); l.className = "list"; docs.forEach(i => l.append(row(i))); main.insertBefore(l, sentinel); }
+    }
+    if (!queue.length) io.disconnect();
+  }
+  main.append(sentinel);
+  more(); io.observe(sentinel);
+  if (words.length) {
+    const elsewhere = others.filter(ok).slice(0, 200);
+    if (elsewhere.length) {
+      main.append(Object.assign(document.createElement("h2"), {textContent: "Em outros HDs"}));
+      const box = document.createElement("div"); box.className = "others";
+      for (const o of elsewhere) {
+        const d = document.createElement("div");
+        d.append(Object.assign(document.createElement("span"), {textContent: o.name}),
+                 Object.assign(document.createElement("span"), {className: "meta", textContent: `${when(o.date)} · ${o.vol}`}));
+        box.append(d);
+      }
+      main.append(box);
+    }
+  }
+}
+let t; document.getElementById("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(render, 150); });
+render();
+document.body.append(Object.assign(document.createElement("p"), {className: "note", style: "max-width:1400px;margin:0 auto;padding:0 16px 30px",
+  textContent: `Catálogo gerado em ${new Date(DATA.exported_at).toLocaleString("pt-BR")}. Os originais estão nas pastas por ano e mês deste disco.`}));
+</script>
+</body>
+</html>

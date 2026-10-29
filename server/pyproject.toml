@@ -10,11 +10,15 @@ requires-python = ">=3.11"
 # Keep this list small: every dependency must install on Termux (Android ARM64).
 # uvicorn without [standard]: uvloop/httptools need a compiler; plain h11 is enough.
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
+    "fastapi>=0.110",          # Termux: needs pydantic-core (see docs/realme.md)
+    "uvicorn>=0.29",           # pure Python with h11
+    "python-multipart>=0.0.9", # pure Python
+    "pillow>=10",              # Termux: pkg install python-pillow
 ]
 
 [project.optional-dependencies]
+heic = ["pillow-heif>=0.16"]         # HEIC thumbnails; fallback: exiftool preview
+https = ["cryptography>=41"]         # Termux: pkg install python-cryptography
 dev = [
     "pytest>=8",
     "httpx>=0.27",
@@ -27,7 +31,7 @@ acervo = "acervo.__main__:main"
 include = ["acervo*"]
 
 [tool.setuptools.package-data]
-acervo = ["migrations/*.sql", "static/*"]
+acervo = ["migrations/*.sql", "static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

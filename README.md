@@ -5,119 +5,105 @@ celular Android antigo (Realme 9) dentro de casa. O celular **recebe, organiza e
 guarda temporariamente**; HDs externos numerados são o arquivo definitivo. O
 catálogo continua navegável e buscável mesmo depois que os originais vão para o HD.
 
-A especificação completa está em [`docs/especificacao.md`](docs/especificacao.md).
+```
+ iPhone (web app + Atalhos) ─┐                         ┌─ HD VOLUME-001 (exFAT)
+                             ├─► Realme (servidor) ◄───┤  originais + ABRIR-ACERVO.html
+ Mac (app + navegador) ──────┘   catálogo, miniaturas  └─ HD VOLUME-002 …
+                                    Entrada → Acervo → HD
+```
+
+| Guia | Para quê |
+|---|---|
+| [docs/realme.md](docs/realme.md) | Instalar o servidor no Realme (Termux) |
+| [docs/iphone.md](docs/iphone.md) | Web app, certificado, Atalhos e backup diário |
+| [mac/README.md](mac/README.md) | Compilar e usar o app do Mac (HDs, Esvaziar iPhone) |
+| [docs/especificacao.md](docs/especificacao.md) | O plano do projeto (fonte da verdade) |
+| [docs/api.md](docs/api.md) | A API do servidor |
+| [docs/esquema-catalogo.md](docs/esquema-catalogo.md) | O `catalogo.db`, tabela por tabela |
+| [docs/riscos.md](docs/riscos.md) | Riscos e como cada um foi tratado |
 
 ## Situação
 
 | Fase | O que entrega | Estado |
 |---|---|---|
-| 0 — Fundação | Servidor sobe no Mac, catálogo com migrações, `/api/health` | ✅ pronta |
-| 1 — Núcleo | Upload, deduplicação, organização, miniaturas, interface | aguardando aprovação |
-| 2 — Triagem | Entrada, lote, modo rápido, lixeira, sugestões | — |
-| 3 — Realme | Instalação no Termux, senha, Tailscale | — |
-| 4 — iPhone | Atalhos, backup diário, Esvaziar iPhone, PWA | — |
-| 5 — App Mac e HDs | Tauri, volumes, transferência verificada | — |
-| 6 — Busca avançada | GPS, texto, OCR, quase-duplicados | — |
-| 7 — Opcional | Busca semântica | — |
+| 0 — Fundação | Servidor, catálogo com migrações, `/api/health` | ✅ |
+| 1 — Núcleo | Upload retomável, deduplicação (camadas 1–4), organizador, miniaturas, abas, linha do tempo, busca | ✅ |
+| 2 — Triagem | Entrada, lote, modo rápido, lixeira de 30 dias, sugestões | ✅ |
+| 3 — Realme | `instalar.sh`, início automático, supervisor, senha, HTTPS, Tailscale | ✅ (falta rodar no aparelho) |
+| 4 — iPhone | Atalho manual, backup diário, Esvaziar iPhone, PWA | ✅ (atalhos montados à mão, guia passo a passo) |
+| 5 — App Mac e HDs | Tauri, Dispositivos, volumes, transferência verificada, `ABRIR-ACERVO.html`, saúde | ✅ (compilar no Mac) |
+| 6 — Busca avançada | Lugar por GPS offline, texto de documentos, OCR só carregando, quase-duplicados (pHash), microSD | ✅ |
+| 7 — Opcional | Busca semântica (CLIP) | ⏸ não feita — veja abaixo |
 
-## Como rodar no Mac
+**Fase 7:** o modelo CLIP precisa do `onnxruntime`, que não tem versão para o
+Termux/Android; no Snapdragon 680 cada foto levaria segundos. A fila de tarefas
+já tem o tipo `embedding` reservado: dá para fazer depois, rodando no Mac.
 
-Você só precisa do Terminal. Na primeira vez:
+## Rodar no Mac (desenvolvimento)
 
-1. Abra o Terminal e entre na pasta do projeto:
-   ```bash
-   cd caminho/para/lcfilessave
-   ```
-2. Prepare o ambiente (instala o Python 3.12 pelo Homebrew se faltar — ele pergunta antes):
-   ```bash
-   scripts/setup-mac.sh
-   ```
-3. Suba o servidor:
-   ```bash
-   scripts/dev.sh
-   ```
-4. Abra **http://127.0.0.1:8765** no navegador. Você deve ver "Tudo certo",
-   a versão do catálogo e o espaço livre do disco.
+1. Abra o Terminal na pasta do projeto.
+2. `scripts/setup-mac.sh` — instala o Python 3.12, exiftool, ffmpeg, poppler,
+   tesseract e Node pelo Homebrew (pergunta antes) e compila a interface.
+3. `scripts/dev.sh` e abra **http://127.0.0.1:8765**.
+4. Arraste fotos para a janela. Elas aparecem na **Entrada**; mantenha-as e veja
+   no **Acervo**, organizadas por ano e mês.
 
-Para parar o servidor, volte ao Terminal e aperte `Ctrl + C`.
-
-Os dados de teste ficam em `dev-dados/`, dentro do projeto. Pode apagar essa
-pasta à vontade: ela é recriada vazia na próxima vez que o servidor subir.
+Para parar: `Ctrl + C`. Os dados de teste ficam em `dev-dados/` (pode apagar).
+Sem senha definida, o servidor só aceita este computador.
 
 ### Testes
 
 ```bash
-scripts/test.sh
+scripts/test.sh            # servidor: 78 testes
+cd web && npm run check    # interface: verificação de tipos
+cd mac/src-tauri && cargo test
 ```
 
-Todos devem passar (`43 passed`). Eles conferem, entre outras coisas, que o
-próprio banco recusa apagar um arquivo do servidor sem cópia verificada em HD.
+Os testes do servidor incluem os cinco obrigatórios da especificação (mesmo
+arquivo com nome diferente; mesmo nome com conteúdo diferente; arquivo já
+arquivado em HD; upload interrompido e retomado; dois uploads simultâneos) e
+conferem que o próprio banco recusa apagar um arquivo sem cópia verificada.
 
-### Comandos úteis
+Medido aqui: 500 fotos enviadas em ~6 s, miniaturas em ~22 s (no Realme, espere
+uns 3–5× mais), triagem de 500 itens em 0,4 s, busca em ~10 ms.
 
-```bash
-server/.venv/bin/acervo config     # mostra a configuração em uso
-server/.venv/bin/acervo migrate    # cria/atualiza o catálogo sem subir o servidor
-```
+## Regras invioláveis — onde cada uma é garantida
 
-A configuração fica em `acervo.toml` (criado a partir de `acervo.example.toml`
-na primeira execução; os comentários explicam cada opção).
+| Regra | Garantia |
+|---|---|
+| 1. Backup diário nunca apaga do iPhone | Os atalhos não têm ação de apagar; o servidor não tem como apagar no iPhone |
+| 2. Backup diário cai na Entrada | Todo item novo nasce `inbox` (padrão do banco) |
+| 3. Nada é apagado sem verificação por hash | Gatilhos no banco recusam tirar um arquivo do servidor sem cópia verificada em HD; cópia entre discos relê o hash antes de apagar a origem |
+| 4. Nada repetido | `sha256` único no catálogo inteiro, trava por hash no servidor |
+| 5. Originais intactos | Originais só são lidos; miniaturas e prévias são arquivos separados |
+| 6. Lixeira de 30 dias | `trash_days` não aceita menos de 30; purga só sai da lixeira |
+| 7. Nunca exposto, sempre com senha | Servidor recusa escutar na rede sem senha; acesso só LAN + Tailscale |
+| 8. `ABRIR-ACERVO.html` em todo HD | Gerado a cada transferência; funciona offline em qualquer navegador |
 
-## Como rodar no Realme
-
-Chega na Fase 3, com um `instalar.sh` para o Termux e o passo a passo para o
-Android não matar o servidor.
-
-## Estrutura do repositório
+## Estrutura
 
 ```
 lcfilessave/
-├── README.md                 este arquivo
-├── CLAUDE.md                 regras para a IA de desenvolvimento
-├── acervo.example.toml       modelo de configuração
-├── docs/
-│   ├── especificacao.md      o plano do projeto (fonte da verdade)
-│   ├── esquema-catalogo.md   o catalogo.db explicado, tabela por tabela
-│   └── riscos.md             riscos do plano e como cada um é tratado
-├── server/                   servidor Python (FastAPI) — roda no Mac e no Realme
-│   ├── pyproject.toml
-│   ├── acervo/
-│   │   ├── __main__.py       linha de comando: serve, migrate, config
-│   │   ├── app.py            aplicação web
-│   │   ├── config.py         leitura e validação do acervo.toml
-│   │   ├── db.py             conexão SQLite e migrações
-│   │   ├── storage.py        pastas de dados e espaço em disco
-│   │   ├── api/              rotas da API (/api/…)
-│   │   ├── migrations/       0001_initial.sql, 0002_…  (nunca editar uma aplicada)
-│   │   └── static/           página provisória (a interface real vem na Fase 1)
+├── server/          servidor Python (FastAPI) — Mac e Realme
+│   ├── acervo/      código (ingest, library, jobs, api/, migrations/ …)
 │   └── tests/
-├── web/                      interface Svelte (Fase 1)
-├── mac/                      app Tauri para o Mac (Fase 5)
-└── scripts/                  setup-mac.sh, dev.sh, test.sh
+├── web/             interface Svelte (navegador, PWA do iPhone, app do Mac)
+├── mac/             app Tauri do Mac (discos, transferência, Esvaziar iPhone)
+├── scripts/         setup-mac.sh, dev.sh, test.sh, termux/ (instalador do Realme)
+└── docs/
 ```
 
-Pasta de dados (no Mac, `dev-dados/`; no Realme, definida na Fase 3):
+Pasta de dados no servidor:
 
 ```
-dados/
-├── entrada/       arquivos aguardando triagem
+acervo-dados/
+├── entrada/       aguardando triagem
 ├── acervo/        AAAA/MM/{fotos,videos,docs,audios,outros}/
 ├── lixeira/       30 dias
 ├── miniaturas/    por sha256, nunca apagadas
+├── previas/       cache descartável (HEIC → JPEG para o navegador)
+├── geo/           base de cidades offline
+├── certificados/  HTTPS próprio
 ├── tmp/           uploads em andamento
 └── catalogo.db
 ```
-
-## Regras invioláveis
-
-1. O backup diário nunca apaga nada do iPhone.
-2. Tudo que chega pelo backup diário cai na Entrada.
-3. Nada é apagado de lugar nenhum sem verificação por hash (SHA-256).
-4. Nenhum arquivo repetido é armazenado.
-5. Originais intactos: nunca recomprimir, converter ou alterar.
-6. Descarte passa por lixeira (30 dias).
-7. Servidor nunca exposto à internet; só rede local e Tailscale, sempre com senha.
-8. Todo HD leva um `ABRIR-ACERVO.html` que funciona offline.
-
-As regras 3, 4 e 6 já são garantidas pelo próprio banco de dados — veja
-[`docs/esquema-catalogo.md`](docs/esquema-catalogo.md).

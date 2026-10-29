@@ -49,7 +49,31 @@ say "Instalando dependências"
 "$SERVER/.venv/bin/pip" install --quiet --upgrade pip
 "$SERVER/.venv/bin/pip" install --quiet -e "$SERVER[dev]"
 
-# 4. Configuração local de desenvolvimento
+# 4. Ferramentas de mídia (as mesmas do Realme) e a interface
+if command -v brew >/dev/null 2>&1; then
+  missing=()
+  for tool in exiftool ffmpeg pdftotext tesseract node; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if (( ${#missing[@]} )); then
+    say "Faltam: ${missing[*]}. Instalar pelo Homebrew? [s/N]"
+    read -r answer
+    if [[ "$answer" =~ ^[sS]$ ]]; then
+      pkgs=()
+      for tool in "${missing[@]}"; do
+        case "$tool" in pdftotext) pkgs+=(poppler) ;; tesseract) pkgs+=(tesseract tesseract-lang) ;; *) pkgs+=("$tool") ;; esac
+      done
+      brew install "${pkgs[@]}"
+    fi
+  fi
+fi
+"$SERVER/.venv/bin/pip" install --quiet pillow-heif cryptography || true
+if command -v npm >/dev/null 2>&1 && [[ -f "$ROOT/web/package.json" ]]; then
+  say "Compilando a interface"
+  (cd "$ROOT/web" && npm install --no-audit --no-fund --loglevel=error && npm run build)
+fi
+
+# 5. Configuração local de desenvolvimento
 if [[ ! -f "$ROOT/acervo.toml" ]]; then
   cp "$ROOT/acervo.example.toml" "$ROOT/acervo.toml"
   say "Criado acervo.toml (dados de teste em ./dev-dados)"

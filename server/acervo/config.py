@@ -20,13 +20,17 @@ from pathlib import Path
 
 DEFAULT_PORT = 8765
 DEFAULT_DATA_DIR = Path.home() / "acervo-dados"
+REPO_WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
 # Subfolders of the data dir. Keep in sync with docs and README.
 INBOX_DIR = "entrada"
 LIBRARY_DIR = "acervo"
 TRASH_DIR = "lixeira"
 THUMBS_DIR = "miniaturas"
+PREVIEWS_DIR = "previas"  # disposable cache of browser-viewable previews (HEIC -> JPEG)
 TMP_DIR = "tmp"  # partial uploads; same filesystem as the rest so moves are atomic
+GEO_DIR = "geo"  # offline city database
+CERTS_DIR = "certificados"
 DB_FILENAME = "catalogo.db"
 
 
@@ -39,9 +43,17 @@ class Config:
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
     host: str = "127.0.0.1"
     port: int = DEFAULT_PORT
+    server_name: str = "Acervo"
     storage_alert_pct: int = 80
     archive_batch_gb: int = 80
+    archive_copies: int = 1
     trash_days: int = 30
+    https: bool = False
+    tls_names: tuple[str, ...] = ()
+    sd_dir: Path | None = None
+    catalog_backup_dir: Path | None = None
+    web_dir: Path = field(default_factory=lambda: REPO_WEB_DIST)
+    workers: bool = True  # background jobs (thumbnails, OCR…); tests turn them off
     config_file: Path | None = None
 
     @property
@@ -51,6 +63,13 @@ class Config:
     def subdir(self, name: str) -> Path:
         return self.data_dir / name
 
+    def root_dir(self, root: str) -> Path:
+        if root == "main":
+            return self.data_dir
+        if root == "sd" and self.sd_dir is not None:
+            return self.sd_dir
+        raise ConfigError(f"Local de armazenamento '{root}' não configurado.")
+
     def validate(self) -> None:
         if not (1 <= self.port <= 65535):
             raise ConfigError(f"Porta inválida: {self.port}. Use um número entre 1 e 65535.")
@@ -58,6 +77,8 @@ class Config:
             raise ConfigError("storage_alert_pct deve ficar entre 50 e 95.")
         if self.archive_batch_gb <= 0:
             raise ConfigError("archive_batch_gb deve ser maior que zero.")
+        if self.archive_copies not in (1, 2, 3):
+            raise ConfigError("archive_copies deve ser 1, 2 ou 3.")
         if self.trash_days < 30:
             # Inviolable rule 6: discarded items spend 30 days in the trash.
             raise ConfigError("trash_days não pode ser menor que 30 (regra da lixeira).")
@@ -72,10 +93,14 @@ def is_loopback(host: str) -> bool:
         return False
 
 
-_ALLOWED_KEYS = {"data_dir", "host", "port", "storage_alert_pct", "archive_batch_gb", "trash_days"}
+_INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", "trash_days"}
+_STR_KEYS = {"host", "server_name"}
+_BOOL_KEYS = {"https", "workers"}
+_PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir"}
+_ALLOWED_KEYS = _INT_KEYS | _STR_KEYS | _BOOL_KEYS | _PATH_KEYS | {"tls_names"}
 
 
-def load_config(path: str | os.PathLike[str] | None = None) -> Config:
+def load_config(path: str | os.PathLike[str] | None = None, **overrides: object) -> Config:
     file_path = _find_config_file(path)
     values: dict[str, object] = {}
 
@@ -90,22 +115,30 @@ def load_config(path: str | os.PathLike[str] | None = None) -> Config:
 
         unknown = set(raw) - _ALLOWED_KEYS
         if unknown:
-            raise ConfigError(
-                f"Opções desconhecidas em {file_path}: {', '.join(sorted(unknown))}"
-            )
+            raise ConfigError(f"Opções desconhecidas em {file_path}: {', '.join(sorted(unknown))}")
         values.update(raw)
-        if "data_dir" in values:
-            values["data_dir"] = _resolve(Path(str(values["data_dir"])), file_path.parent)
+        for key in _PATH_KEYS & set(values):
+            values[key] = _resolve(Path(str(values[key])), file_path.parent)
 
     env_data_dir = os.environ.get("ACERVO_DATA_DIR")
     if env_data_dir:
         values["data_dir"] = _resolve(Path(env_data_dir), Path.cwd())
+    values.update(overrides)
 
-    for key in ("port", "storage_alert_pct", "archive_batch_gb", "trash_days"):
-        if key in values and not isinstance(values[key], int):
+    for key in _INT_KEYS & set(values):
+        if not isinstance(values[key], int) or isinstance(values[key], bool):
             raise ConfigError(f"'{key}' precisa ser um número inteiro.")
-    if "host" in values and not isinstance(values["host"], str):
-        raise ConfigError("'host' precisa ser texto, por exemplo \"127.0.0.1\".")
+    for key in _STR_KEYS & set(values):
+        if not isinstance(values[key], str):
+            raise ConfigError(f"'{key}' precisa ser texto entre aspas.")
+    for key in _BOOL_KEYS & set(values):
+        if not isinstance(values[key], bool):
+            raise ConfigError(f"'{key}' precisa ser true ou false.")
+    if "tls_names" in values:
+        names = values["tls_names"]
+        if not isinstance(names, (list, tuple)) or not all(isinstance(n, str) for n in names):
+            raise ConfigError("'tls_names' precisa ser uma lista de textos.")
+        values["tls_names"] = tuple(names)
 
     cfg = Config(config_file=file_path, **values)  # type: ignore[arg-type]
     cfg.validate()
