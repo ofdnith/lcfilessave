@@ -1,0 +1,21 @@
+# Configuração e dados locais
+acervo.toml
+dev-dados/
+*.db
+*.db-wal
+*.db-shm
+*.db.bak-*
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+
+# Web / Tauri (fases futuras)
+node_modules/
+dist/
+target/
+
+# Sistema
+.DS_Store

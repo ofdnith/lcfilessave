@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Acervo</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b35;
+    --text: #e7e9ee; --muted: #8b93a3; --ok: #3ecf8e; --warn: #f5b84b; --bad: #ef5d5d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 16px;
+  }
+  main { width: 100%; max-width: 420px; }
+  h1 { font-size: 28px; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .status { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-bottom: 14px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .ok .dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  .degraded .dot { background: var(--bad); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 14px; }
+  .bar > div { height: 100%; background: var(--ok); width: 0; transition: width .4s; }
+  .bar.alert > div { background: var(--warn); }
+  ul { color: var(--bad); padding-left: 18px; margin: 14px 0 0; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 16px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Acervo</h1>
+  <p class="sub">Fase 0 — o servidor está de pé. A interface chega na Fase 1.</p>
+  <div class="card" id="card">
+    <div class="status"><span class="dot"></span><span id="status">Consultando…</span></div>
+    <dl>
+      <dt>Versão</dt><dd id="version">—</dd>
+      <dt>Catálogo</dt><dd id="catalog">—</dd>
+      <dt>Espaço livre</dt><dd id="free">—</dd>
+    </dl>
+    <div class="bar" id="bar"><div></div></div>
+    <ul id="problems" hidden></ul>
+  </div>
+  <footer>Detalhes técnicos em <a href="/api/health" style="color:inherit">/api/health</a></footer>
+</main>
+<script>
+  const gb = (b) => (b / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " GB";
+  async function refresh() {
+    const card = document.getElementById("card");
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      const h = await res.json();
+      card.className = "card " + h.status;
+      document.getElementById("status").textContent =
+        h.status === "ok" ? "Tudo certo" : "Precisa de atenção";
+      document.getElementById("version").textContent = h.version;
+      document.getElementById("catalog").textContent = h.catalog.ok
+        ? "versão " + h.catalog.schema_version
+        : "com problema";
+      const s = h.storage;
+      document.getElementById("free").textContent = gb(s.free_bytes) + " de " + gb(s.total_bytes);
+      const bar = document.getElementById("bar");
+      bar.classList.toggle("alert", s.alert);
+      bar.firstElementChild.style.width = s.used_pct + "%";
+      const list = document.getElementById("problems");
+      list.hidden = h.problems.length === 0;
+      list.replaceChildren(...h.problems.map((p) => Object.assign(document.createElement("li"), { textContent: p })));
+    } catch {
+      card.className = "card degraded";
+      document.getElementById("status").textContent = "Servidor não respondeu";
+    }
+  }
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>

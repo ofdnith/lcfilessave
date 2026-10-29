@@ -1,0 +1,22 @@
+# Configuração do Acervo.
+# Copie para acervo.toml e ajuste. O acervo.toml não vai para o Git.
+# Caminhos relativos são contados a partir da pasta deste arquivo.
+
+# Onde ficam os arquivos e o catálogo.
+# No Mac (desenvolvimento): uma pasta de teste dentro do projeto.
+# No Realme (Fase 3): o instalar.sh define o caminho certo.
+data_dir = "dev-dados"
+
+# Endereço e porta. Por enquanto só 127.0.0.1 (este computador):
+# o acesso pela rede exige senha, que chega na Fase 3.
+host = "127.0.0.1"
+port = 8765
+
+# Mostrar alerta quando o disco passar desta porcentagem.
+storage_alert_pct = 80
+
+# Tamanho sugerido de um lote para transferir a um HD, em GB.
+archive_batch_gb = 80
+
+# Dias que um item passa na lixeira antes de ser apagado de vez (mínimo 30).
+trash_days = 30
