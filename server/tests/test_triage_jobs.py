@@ -204,3 +204,18 @@ def test_https_certificate_for_iphone(tmp_path):
     # regenerating keeps the same CA (already installed on the iPhone)
     generate(tmp_path / "certs", ["192.168.0.51"])
     assert x509.load_pem_x509_certificate(ca.read_bytes()).serial_number == ca_cert.serial_number
+
+
+def test_search_by_file_name_with_underscore(api, tmp_path):
+    iid = api.upload(make_jpeg(tmp_path / "IMG_1234.JPG"))["item_id"]
+    for q in ("IMG_1234", "img_12", "IMG_1234.JPG", "1234"):
+        assert [i["id"] for i in api.get("/api/items", params={"view": "inbox", "q": q}).json()["items"]] == [iid], q
+
+
+def test_item_detail_gives_drive_path(api, tmp_path):
+    from test_archive import archive_everything
+    iid = api.upload(make_jpeg(tmp_path / "IMG_D.JPG"))["item_id"]
+    api.act([iid], "keep")
+    archive_everything(api, tmp_path / "hd")
+    f = api.item(iid)["files"][0]
+    assert f["rel_path"] == "2024/05/fotos/2024-05-01_1012_IMG_D.JPG" and (tmp_path / "hd" / f["rel_path"]).exists()

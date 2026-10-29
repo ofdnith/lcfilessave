@@ -218,7 +218,7 @@
         {:else}
           <div class="doc">
             {#if item.thumb_url}
-              <img class="doc-thumb" src={item.thumb_url} alt="" />
+              <img class="doc-thumb" class:media={item.kind === 'photo' || item.kind === 'video'} src={item.thumb_url} alt={item.original_name} />
             {:else}
               <div class="doc-icon"><Icon name={item.kind === 'audio' ? 'audio' : item.kind === 'document' ? 'doc' : 'file'} size={48} /></div>
             {/if}
@@ -241,12 +241,6 @@
         {/if}
       </div>
 
-      {#if onDriveOnly && (item.kind === 'photo' || item.kind === 'video')}
-        <div class="drive-pill">
-          <Icon name="drive" size={15} /> Original no {item.volume?.name}
-          {#if mountPath}<button class="link" onclick={openOnDrive}>Abrir</button>{/if}
-        </div>
-      {/if}
 
       {#if viewer.index > 0}
         <button class="nav prev" onclick={() => step(-1)} aria-label="Anterior"><Icon name="left" size={26} /></button>
@@ -428,6 +422,10 @@
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
     margin-bottom: 10px;
   }
+  .doc-thumb.media {
+    max-width: min(480px, 80vw);
+    max-height: 50vh;
+  }
   .doc-icon {
     width: 104px;
     height: 104px;
@@ -454,27 +452,6 @@
   }
   .drive-note {
     color: var(--accent);
-    font-weight: 600;
-  }
-  .drive-pill {
-    position: absolute;
-    bottom: calc(var(--sab) + 16px);
-    left: 50%;
-    transform: translateX(-50%);
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    padding: 7px 14px;
-    border-radius: 999px;
-    background: rgba(30, 39, 49, 0.92);
-    color: var(--accent);
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .link {
-    color: var(--text);
-    text-decoration: underline;
     font-weight: 600;
   }
   .nav {
