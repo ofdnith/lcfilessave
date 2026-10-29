@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-copy-to-volume"
+description = "Enables the copy_to_volume command without any pre-configured scope."
+commands.allow = ["copy_to_volume"]
+
+[[permission]]
+identifier = "deny-copy-to-volume"
+description = "Denies the copy_to_volume command without any pre-configured scope."
+commands.deny = ["copy_to_volume"]

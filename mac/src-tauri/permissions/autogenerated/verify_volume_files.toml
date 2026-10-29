@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-verify-volume-files"
+description = "Enables the verify_volume_files command without any pre-configured scope."
+commands.allow = ["verify_volume_files"]
+
+[[permission]]
+identifier = "deny-verify-volume-files"
+description = "Denies the verify_volume_files command without any pre-configured scope."
+commands.deny = ["verify_volume_files"]

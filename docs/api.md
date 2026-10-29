@@ -18,6 +18,7 @@ Tudo em `/api/*` exige login, exceto `/api/health` e `/api/auth/*`.
 | GET | `/api/auth/status` | — | `{password_set, authenticated, method}` (`method`: `cookie`/`token`/`local`/`null`) |
 | POST | `/api/auth/login` | `{password, client?}` | `{token}` + cookie. 401 se errada; 429 após muitas tentativas |
 | POST | `/api/auth/logout` | — | `{ok}` |
+| POST | `/api/auth/app-token` | — (precisa estar logado) | `{token}` de longa duração para os comandos nativos do app do Mac |
 
 Tokens de longa duração para os Atalhos: `acervo token criar "iPhone"` no servidor.
 
@@ -198,10 +199,12 @@ Se `sha256` vier e não bater com o recebido: `failed` (arquivo corrompido no ca
 | Método | Rota | Corpo | Resposta |
 |---|---|---|---|
 | GET | `/api/volumes` | — | `{volumes: [Volume], archive_copies}` |
-| POST | `/api/volumes` | `{capacity_bytes, filesystem}` | `Volume` (nome `VOLUME-NNN` automático) |
+| POST | `/api/volumes` | `{capacity_bytes, filesystem, id?}` | `Volume` (nome `VOLUME-NNN` automático; `id` = UUID gerado pelo app, opcional) |
 | POST | `/api/volumes/{id}/seen` | `{used_bytes?}` | `Volume` |
 | GET | `/api/archive/plan?volume_id=…&max_bytes=…` | — | `{files: [PlanFile], total_bytes}` |
-| GET | `/api/files/{file_id}/content` | — | bytes do original |
+| GET | `/api/files/{file_id}/content` | — | bytes do original (404 se já saiu do servidor) |
+| GET | `/api/volumes/{id}/catalog.db` | — | catálogo só deste HD (usado pelo bundle) |
+| GET | `/api/volumes/{id}/abrir.html` | — | `ABRIR-ACERVO.html` deste HD (usado pelo bundle) |
 | POST | `/api/archive/verified` | `{volume_id, copies: [{file_id, rel_path, sha256}]}` | `{accepted: [ids], rejected: [{file_id, error}]}` |
 | POST | `/api/archive/commit` | `{volume_id}` | `{archived_items, freed_bytes}` |
 | GET | `/api/volumes/{id}/bundle` | — | `{files: [{path, url}]}` |

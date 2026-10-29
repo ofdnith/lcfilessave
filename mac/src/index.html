@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acervo</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --line: #262b36;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #4c8dff;
+    --accent-press: #3b78e6;
+    --ok: #22c55e;
+    --err: #f87171;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  main {
+    width: 100%;
+    max-width: 460px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 32px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .brand img { width: 44px; height: 44px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  p { margin: 0 0 16px; color: var(--muted); }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input {
+    width: 100%;
+    padding: 11px 12px;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    outline: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  input:focus { border-color: var(--accent); }
+  .hint { font-size: 13px; margin: 6px 0 20px; }
+  .hint code { color: var(--text); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 10px 16px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:active { background: var(--accent-press); }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { margin-top: 18px; min-height: 22px; font-size: 14px; }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--err); }
+  #status.busy { color: var(--muted); }
+  #status.warn { color: var(--warn); }
+  .hidden { display: none !important; }
+  .spinner {
+    width: 28px; height: 28px; margin: 8px auto 16px;
+    border: 3px solid var(--line); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .center { text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <img src="icon.png" alt="">
+    <h1>Acervo</h1>
+  </div>
+
+  <!-- Shown while trying the saved server at startup -->
+  <section id="connecting" class="hidden center">
+    <div class="spinner"></div>
+    <p>Conectando a <strong id="connecting-url"></strong>…</p>
+  </section>
+
+  <!-- Saved server did not answer -->
+  <section id="offline" class="hidden">
+    <p id="offline-msg"></p>
+    <div class="row">
+      <button id="retry" class="primary" type="button">Tentar de novo</button>
+      <button id="change" type="button">Trocar servidor</button>
+    </div>
+  </section>
+
+  <!-- Server address form -->
+  <form id="setup" class="hidden" autocomplete="off">
+    <p>Digite o endereço do seu servidor Acervo. Você o encontra na tela do
+       servidor ou no Tailscale.</p>
+    <label for="url">Endereço do servidor</label>
+    <input id="url" name="url" type="text" inputmode="url" spellcheck="false"
+           autocapitalize="off" placeholder="http://192.168.0.50:8765" required>
+    <div class="hint">Em casa: <code>http://192.168.0.50:8765</code> · Fora de casa:
+      <code>https://acervo.seu-tailnet.ts.net</code></div>
+    <div class="row">
+      <button id="test" type="button">Testar conexão</button>
+      <button id="save" class="primary" type="submit">Salvar e abrir</button>
+      <button id="cancel" type="button" class="hidden">Cancelar</button>
+    </div>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const tauri = window.__TAURI__;
+  const params = new URLSearchParams(location.search);
+
+  function invoke(cmd, args) {
+    if (!tauri || !tauri.core) {
+      return Promise.reject("Esta página só funciona dentro do app Acervo.");
+    }
+    return tauri.core.invoke(cmd, args);
+  }
+
+  function show(section) {
+    for (const id of ["connecting", "offline", "setup"]) {
+      $(id).classList.toggle("hidden", id !== section);
+    }
+  }
+
+  function setStatus(text, kind) {
+    const el = $("status");
+    el.textContent = text || "";
+    el.className = kind || "";
+  }
+
+  function busy(on) {
+    for (const id of ["test", "save", "retry"]) $(id).disabled = on;
+  }
+
+  function describe(check) {
+    const v = check.version ? ` (versão ${check.version})` : "";
+    if (check.status === "ok") return { text: `Servidor encontrado${v}. Tudo certo.`, kind: "ok" };
+    const p = check.problems && check.problems.length ? `: ${check.problems.join("; ")}` : "";
+    return { text: `Servidor encontrado${v}, mas com problemas${p}.`, kind: "warn" };
+  }
+
+  function openServer(url) {
+    setStatus("Abrindo…", "busy");
+    // Full navigation: the server's own UI takes over this window.
+    location.replace(url + "/");
+  }
+
+  async function connectSaved(url) {
+    show("connecting");
+    $("connecting-url").textContent = url;
+    setStatus("");
+    try {
+      await invoke("test_server", { url });
+      openServer(url);
+    } catch (err) {
+      show("offline");
+      $("offline-msg").textContent = String(err);
+      setStatus("O servidor não respondeu.", "err");
+    }
+  }
+
+  async function testTyped() {
+    const url = $("url").value;
+    busy(true);
+    setStatus("Testando…", "busy");
+    try {
+      const check = await invoke("test_server", { url });
+      $("url").value = check.url;
+      const d = describe(check);
+      setStatus(d.text, d.kind);
+      return check;
+    } catch (err) {
+      setStatus(String(err), "err");
+      return null;
+    } finally {
+      busy(false);
+    }
+  }
+
+  async function saveAndOpen(ev) {
+    ev.preventDefault();
+    const check = await testTyped();
+    if (!check) return;
+    busy(true);
+    try {
+      const origin = await invoke("set_server_url", { url: check.url });
+      openServer(origin);
+    } catch (err) {
+      setStatus(String(err), "err");
+      busy(false);
+    }
+  }
+
+  async function start() {
+    let saved = null;
+    try { saved = await invoke("get_server_url"); } catch (err) { setStatus(String(err), "err"); }
+    if (saved) $("url").value = saved;
+    $("cancel").classList.toggle("hidden", !saved);
+
+    if (saved && !params.has("trocar")) {
+      connectSaved(saved);
+    } else {
+      show("setup");
+      $("url").focus();
+      $("url").select();
+    }
+  }
+
+  $("test").addEventListener("click", testTyped);
+  $("setup").addEventListener("submit", saveAndOpen);
+  $("retry").addEventListener("click", async () => {
+    const saved = await invoke("get_server_url").catch(() => null);
+    if (saved) connectSaved(saved); else show("setup");
+  });
+  $("change").addEventListener("click", () => { show("setup"); setStatus(""); $("url").focus(); });
+  $("cancel").addEventListener("click", async () => {
+    const saved = await invoke("get_server_url").catch(() => null);
+    if (saved) connectSaved(saved);
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>

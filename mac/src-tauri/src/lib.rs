@@ -17,6 +17,9 @@ mod disks;
 mod transfer;
 mod upload;
 
+#[cfg(test)]
+mod integration_tests;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -25,7 +28,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::ipc::CapabilityBuilder;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Url, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -106,7 +109,7 @@ fn grant_remote(app: &AppHandle, state: &AppState, origin: &str) -> Result<(), S
     }
     let id = format!("remote-server-{}", sh.granted.len() + 1);
     let mut cap = CapabilityBuilder::new(id)
-        .remote(format!("{origin}/*"))
+        .remote(remote_pattern(origin))
         .local(false)
         .window(MAIN_WINDOW);
     for p in REMOTE_PERMISSIONS {
@@ -116,6 +119,11 @@ fn grant_remote(app: &AppHandle, state: &AppState, origin: &str) -> Result<(), S
         .map_err(|e| format!("Não consegui liberar o servidor no app: {e}"))?;
     sh.granted.insert(origin.to_string());
     Ok(())
+}
+
+/// URLPattern for the remote capability: every path on exactly this origin.
+fn remote_pattern(origin: &str) -> String {
+    format!("{origin}/*")
 }
 
 fn origin_of(url: &Url) -> String {
@@ -168,7 +176,12 @@ fn set_server_url(
 ) -> Result<String, String> {
     let origin = config::normalize_server_url(&url)?;
     let path = state.shared.lock().unwrap().config_path.clone();
-    config::save(&path, &config::AppConfig { server_url: Some(origin.clone()) })?;
+    config::save(
+        &path,
+        &config::AppConfig {
+            server_url: Some(origin.clone()),
+        },
+    )?;
     state.shared.lock().unwrap().server_url = Some(origin.clone());
     grant_remote(&app, &state, &origin)?;
     Ok(origin)
@@ -184,7 +197,10 @@ struct ServerCheck {
 
 /// GET <url>/api/health from Rust (no CORS involved).
 #[tauri::command]
-async fn test_server(state: tauri::State<'_, AppState>, url: String) -> Result<ServerCheck, String> {
+async fn test_server(
+    state: tauri::State<'_, AppState>,
+    url: String,
+) -> Result<ServerCheck, String> {
     let origin = config::normalize_server_url(&url)?;
     let resp = state
         .http
@@ -206,7 +222,10 @@ async fn test_server(state: tauri::State<'_, AppState>, url: String) -> Result<S
         .json()
         .await
         .map_err(|_| format!("{origin} respondeu, mas não parece ser um servidor Acervo."))?;
-    let status = body.get("status").and_then(|v| v.as_str()).map(str::to_string);
+    let status = body
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let Some(status) = status else {
         return Err(format!(
             "{origin} respondeu (HTTP {}), mas não parece ser um servidor Acervo.",
@@ -216,11 +235,18 @@ async fn test_server(state: tauri::State<'_, AppState>, url: String) -> Result<S
     Ok(ServerCheck {
         url: origin,
         status,
-        version: body.get("version").and_then(|v| v.as_str()).map(str::to_string),
+        version: body
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         problems: body
             .get("problems")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default(),
     })
 }
@@ -237,8 +263,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 
 /// The disk must be plugged in right now; returns its mount path.
 fn plugged_disk(mount_path: &str) -> Result<disks::Disk, String> {
-    disks::find_disk(mount_path)
-        .ok_or_else(|| format!("O disco {mount_path} não está conectado."))
+    disks::find_disk(mount_path).ok_or_else(|| format!("O disco {mount_path} não está conectado."))
 }
 
 fn writable_disk(mount_path: &str) -> Result<disks::Disk, String> {
@@ -263,7 +288,13 @@ async fn init_volume(
 ) -> Result<disks::VolumeJson, String> {
     blocking(move || {
         let d = writable_disk(&mount_path)?;
-        disks::init_volume_at(Path::new(&d.mount_path), &d.filesystem, &id, &name, &created_at)
+        disks::init_volume_at(
+            Path::new(&d.mount_path),
+            &d.filesystem,
+            &id,
+            &name,
+            &created_at,
+        )
     })
     .await?
 }
@@ -304,7 +335,11 @@ async fn copy_to_volume(
         move |done, total| {
             let _ = app.emit(
                 "copy-progress",
-                CopyProgress { rel_path: &rp, bytes_done: done, bytes_total: total },
+                CopyProgress {
+                    rel_path: &rp,
+                    bytes_done: done,
+                    bytes_total: total,
+                },
             );
         },
     )
@@ -341,13 +376,20 @@ async fn verify_volume_files(
     blocking(move || {
         let d = plugged_disk(&mount_path)?;
         let mount = PathBuf::from(&d.mount_path);
-        Ok(files.iter().map(|f| transfer::verify_one(&mount, f)).collect())
+        Ok(files
+            .iter()
+            .map(|f| transfer::verify_one(&mount, f))
+            .collect())
     })
     .await?
 }
 
 #[tauri::command]
-async fn open_on_volume(app: AppHandle, mount_path: String, rel_path: String) -> Result<(), String> {
+async fn open_on_volume(
+    app: AppHandle,
+    mount_path: String,
+    rel_path: String,
+) -> Result<(), String> {
     let path = blocking(move || -> Result<PathBuf, String> {
         let d = plugged_disk(&mount_path)?;
         let p = transfer::safe_join(Path::new(&d.mount_path), &rel_path)?;
@@ -375,7 +417,9 @@ async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         .pick_folder(move |p| {
             let _ = tx.send(p);
         });
-    let picked = rx.await.map_err(|_| "A janela de escolha foi fechada.".to_string())?;
+    let picked = rx
+        .await
+        .map_err(|_| "A janela de escolha foi fechada.".to_string())?;
     Ok(picked
         .and_then(|fp| fp.into_path().ok())
         .map(|p| p.to_string_lossy().into_owned()))
@@ -390,7 +434,7 @@ async fn scan_folder(path: String) -> Result<Vec<ScannedFile>, String> {
 async fn hash_file(path: String) -> Result<String, String> {
     transfer::sha256_file_async(PathBuf::from(&path))
         .await
-        .map_err(|e| format!("Não consegui ler {path}: {e}"))
+        .map_err(|e| format!("Não consegui ler {path}: {}", transfer::io_pt(&e)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -428,7 +472,13 @@ async fn upload_file(
 // ---------------------------------------------------------------------------
 
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let change = MenuItem::with_id(app, MENU_CHANGE_SERVER, "Trocar servidor…", true, None::<&str>)?;
+    let change = MenuItem::with_id(
+        app,
+        MENU_CHANGE_SERVER,
+        "Trocar servidor…",
+        true,
+        None::<&str>,
+    )?;
     let reload = MenuItem::with_id(app, MENU_RELOAD, "Recarregar", true, Some("CmdOrCtrl+R"))?;
     let app_menu = Submenu::with_items(
         app,
@@ -465,7 +515,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         app,
         "Visualizar",
         true,
-        &[&reload, &PredefinedMenuItem::fullscreen(app, Some("Tela cheia"))?],
+        &[
+            &reload,
+            &PredefinedMenuItem::fullscreen(app, Some("Tela cheia"))?,
+        ],
     )?;
     let window = Submenu::with_items(
         app,
@@ -544,7 +597,6 @@ pub fn run() {
             // The bundled page decides where to go: it checks the saved server
             // and navigates there, or asks for an address.
             state.shared.lock().unwrap().local_url = window.url().ok();
-            let _ = WebviewUrl::default(); // (window URL comes from config: index.html)
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -580,6 +632,21 @@ mod tests {
     }
 
     #[test]
+    fn remote_pattern_matches_only_that_origin() {
+        use tauri::utils::acl::RemoteUrlPattern;
+        for origin in ["http://192.168.0.50:8765", "https://acervo.tailnet.ts.net"] {
+            let pat: RemoteUrlPattern = remote_pattern(origin).parse().unwrap();
+            let t = |u: &str| pat.test(&Url::parse(u).unwrap());
+            assert!(t(&format!("{origin}/")));
+            assert!(t(&format!("{origin}/entrada?aba=fotos#x")));
+            assert!(!t("http://192.168.0.51:8765/"));
+            assert!(!t("http://192.168.0.50:9000/"));
+            assert!(!t("https://evil.example/"));
+            assert!(!t("tauri://localhost/index.html"));
+        }
+    }
+
+    #[test]
     fn navigation_guard() {
         let s = shared(Some("http://192.168.0.50:8765"));
         let ok = |u: &str| navigation_allowed(&s, &Url::parse(u).unwrap());
@@ -591,6 +658,9 @@ mod tests {
         assert!(!ok("https://192.168.0.50:8765/"));
         assert!(!ok("https://example.com/"));
         let none = shared(None);
-        assert!(!navigation_allowed(&none, &Url::parse("http://192.168.0.50:8765/").unwrap()));
+        assert!(!navigation_allowed(
+            &none,
+            &Url::parse("http://192.168.0.50:8765/").unwrap()
+        ));
     }
 }
