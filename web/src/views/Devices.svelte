@@ -3,7 +3,7 @@
   import { ago, bytes, num, plural } from '../lib/format';
   import { devices } from '../lib/devices.svelte';
   import { href } from '../lib/router.svelte';
-  import { toast } from '../lib/state.svelte';
+  import { app, toast } from '../lib/state.svelte';
   import type { Disk } from '../lib/native';
   import type { Volume } from '../lib/types';
 
@@ -77,6 +77,9 @@
           <h2><span class="label-tag">{v.name}</span></h2>
           <p class="muted num">{bytes(d.free_bytes)} livres de {bytes(d.total_bytes)} · {plural(v.item_count, 'item', 'itens')}</p>
           <p class="faint small">{checkLine(v)}</p>
+          {#if app.readonly}
+            <p class="lock small"><Icon name="lock" size={14} /> Fora de casa, transferir e verificar HDs ficam bloqueados.</p>
+          {:else}
           <div class="acts">
             <button class="btn small primary" disabled={busy} onclick={() => devices.startTransfer(d, v)}>
               <Icon name="download" size={15} /> Transferir lote para cá
@@ -88,13 +91,16 @@
               Verificação completa
             </button>
           </div>
+          {/if}
         {:else if d.volume}
           <h2>{d.label || d.mount_path}</h2>
           <p class="muted">Tem um {d.volume.name}, mas o servidor não conhece este volume. Ele pode ser de outro Acervo.</p>
         {:else}
           <h2>{d.label || d.mount_path}</h2>
           <p class="muted num">{bytes(d.total_bytes)} · {d.filesystem || 'formato desconhecido'} · ainda não faz parte do acervo</p>
-          {#if d.filesystem.toLowerCase() === 'exfat'}
+          {#if app.readonly}
+            <p class="lock small"><Icon name="lock" size={14} /> Adicione HDs novos quando estiver em casa.</p>
+          {:else if d.filesystem.toLowerCase() === 'exfat'}
             <div class="acts">
               <button class="btn small" disabled={adding === d.mount_path} onclick={() => add(d)}>
                 <Icon name="plus" size={15} /> {adding === d.mount_path ? 'Preparando…' : 'Adicionar como novo volume'}
@@ -275,6 +281,13 @@
   }
   .small {
     font-size: 12.5px;
+  }
+  .lock {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px !important;
+    color: var(--info);
   }
   .warn {
     color: var(--warn);

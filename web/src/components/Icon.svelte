@@ -37,6 +37,16 @@
     plus: 'M12 5v14 M5 12h14',
     server: 'M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01',
     share: 'M12 15V4 M8 8l4-4 4 4 M6 12H5v8h14v-8h-1',
+    map: 'M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z M12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+    album: 'M4 7h16v13H4z M6.5 4h11 M4 16l4.5-4 3.5 3 2.5-2L20 17.5',
+    albumAdd: 'M4 7h12v13H4z M6.5 4h9 M19 9v6 M16 12h6',
+    copy: 'M9 9h11v11H9z M5 15H4V4h11v1',
+    key: 'M14.5 9.5a4.5 4.5 0 1 0-4 4.5l1.5 1.5h2v2h2v2h3v-3l-4.5-4.5a4.5 4.5 0 0 0 0-2.5z M8.5 8.5h.01',
+    bell: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z M10 20.5a2 2 0 0 0 4 0',
+    edit: 'M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4',
+    calendar: 'M4 6h16v14H4z M4 10h16 M8 3v4 M16 3v4',
+    zoom: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13z M20 20l-4.6-4.6 M10.5 8v5 M8 10.5h5',
+    lock: 'M6 11h12v10H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3',
   } as const;
   export type IconName = keyof typeof paths;
 </script>

@@ -5,7 +5,7 @@
   import { api, ApiError } from '../lib/api';
   import { bytes, captureDateTime, kindLabel, num } from '../lib/format';
   import { refreshStats } from '../lib/stats.svelte';
-  import { invalidate, toast } from '../lib/state.svelte';
+  import { app, invalidate, toast } from '../lib/state.svelte';
   import type { ItemList } from '../lib/itemlist.svelte';
   import type { Item } from '../lib/types';
 
@@ -36,6 +36,10 @@
 
   async function act(action: 'keep' | 'discard' | 'important') {
     if (!item || busy) return;
+    if (action === 'discard' && app.readonly) {
+      toast('Fora de casa não dá para descartar (modo seguro).', 'info', undefined, 2500);
+      return;
+    }
     busy = true;
     const it = item;
     flash = action;
@@ -179,7 +183,7 @@
 
   {#if item}
     <footer>
-      <button class="big discard" onclick={() => act('discard')} disabled={busy}>
+      <button class="big discard" onclick={() => act('discard')} disabled={busy || app.readonly}>
         <Icon name="trash" size={22} /><span>Descartar</span><kbd>←</kbd>
       </button>
       <button class="big important" class:on={item.important} onclick={() => act('important')} disabled={busy}>
