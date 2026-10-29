@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import __version__, db, media
+from .. import __version__, db, library, media
 from ..config import Config
 from ..storage import disk_usage, missing_or_unwritable
 
@@ -58,6 +58,20 @@ def health(request: Request) -> JSONResponse:
         "alert": usage.used_pct >= cfg.storage_alert_pct,
     }
 
+    summary = None
+    try:
+        conn = db.connect(cfg.db_path)
+        try:
+            summary = library.storage_summary(cfg, conn)
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    if summary:
+        storage.update(summary)  # a missing card is already in `problems`
+    worker = getattr(request.app.state, "worker", None)
+    thermal = worker.thermal.status() if worker is not None else None
+
     report = getattr(request.app.state, "reconcile_report", {}) or {}
     if report.get("missing"):
         problems.append(f"{report['missing']} arquivos do catálogo não foram encontrados no disco")
@@ -78,6 +92,7 @@ def health(request: Request) -> JSONResponse:
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "catalog": catalog,
         "storage": storage,
+        "thermal": thermal,
         "tools": tools,
         "migration": _migration(cfg),
         "problems": problems,

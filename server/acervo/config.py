@@ -51,6 +51,13 @@ class Config:
     https: bool = False
     tls_names: tuple[str, ...] = ()
     sd_dir: Path | None = None
+    # True: everything kept in triage goes to the microSD (the phone keeps only the
+    # Entrada). False: the card is only used when internal storage passes the alert.
+    sd_for_library: bool = False
+    # Maximum size of the Entrada (awaiting triage), in GB. 0 = no limit.
+    inbox_max_gb: int = 100
+    # Background jobs pause while the battery is at or above this temperature (°C).
+    max_temp_c: int = 40
     catalog_backup_dir: Path | None = None
     web_dir: Path = field(default_factory=lambda: REPO_WEB_DIST)
     # Away from home (Tailscale): "seguro" forbids deleting and drive operations.
@@ -92,6 +99,12 @@ class Config:
                 ipaddress.ip_network(net)
             except ValueError:
                 raise ConfigError(f"remote_networks: rede inválida '{net}'.") from None
+        if self.inbox_max_gb < 0:
+            raise ConfigError("inbox_max_gb não pode ser negativo (0 = sem limite).")
+        if not (30 <= self.max_temp_c <= 55):
+            raise ConfigError("max_temp_c deve ficar entre 30 e 55 (graus Celsius).")
+        if self.sd_for_library and self.sd_dir is None:
+            raise ConfigError("sd_for_library = true precisa de sd_dir (o caminho do cartão microSD).")
         if self.trash_days < 30:
             # Inviolable rule 6: discarded items spend 30 days in the trash.
             raise ConfigError("trash_days não pode ser menor que 30 (regra da lixeira).")
@@ -106,9 +119,10 @@ def is_loopback(host: str) -> bool:
         return False
 
 
-_INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", "trash_days"}
+_INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", "trash_days",
+             "inbox_max_gb", "max_temp_c"}
 _STR_KEYS = {"host", "server_name", "remote_mode", "shortcut_manual_url", "shortcut_daily_url", "push_contact"}
-_BOOL_KEYS = {"https", "workers"}
+_BOOL_KEYS = {"https", "workers", "sd_for_library"}
 _PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir"}
 _LIST_KEYS = {"tls_names", "remote_networks"}
 _ALLOWED_KEYS = _INT_KEYS | _STR_KEYS | _BOOL_KEYS | _PATH_KEYS | _LIST_KEYS

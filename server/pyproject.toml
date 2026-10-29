@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 heic = ["pillow-heif>=0.16"]         # HEIC thumbnails; fallback: exiftool preview
 https = ["cryptography>=41"]         # Termux: pkg install python-cryptography
+fast = ["numpy>=1.24"]               # near-duplicate search; Termux: pkg install python-numpy
 dev = [
     "pytest>=8",
     "httpx>=0.27",

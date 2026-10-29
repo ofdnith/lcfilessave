@@ -45,6 +45,17 @@ h = json.load(open("/tmp/acervo-health.json"))
 s = h["storage"]
 print(f"Servidor: {'OK' if h['status'] == 'ok' else 'COM PROBLEMA'} · versão {h['version']}")
 print(f"Disco: {s['free_bytes']/1e9:.1f} GB livres de {s['total_bytes']/1e9:.0f} GB ({s['used_pct']}% usado)")
+if s.get("inbox_max_bytes"):
+    print(f"Entrada: {s['inbox_bytes']/1e9:.1f} de {s['inbox_max_bytes']/1e9:.0f} GB")
+sd = s.get("sd")
+if sd and sd["present"]:
+    print(f"Cartão microSD: {sd['free_bytes']/1e9:.1f} GB livres de {sd['total_bytes']/1e9:.0f} GB"
+          f" ({sd['used_pct']}% usado) · Acervo no cartão: {sd['library_bytes']/1e9:.1f} GB")
+    if sd["pending_bytes"]:
+        print(f"  … {sd['pending_bytes']/1e9:.1f} GB do Acervo ainda só na memória interna (copiando)")
+t = h.get("thermal")
+if t and t.get("temperature") is not None:
+    print(f"Bateria: {t['temperature']:.1f} °C" + (" · tarefas PAUSADAS até esfriar" if t["paused"] else ""))
 print("Ferramentas: " + ", ".join(f"{k} {'✓' if v else '✗'}" for k, v in h["tools"].items()))
 for p in h["problems"]:
     print("  ! " + p)

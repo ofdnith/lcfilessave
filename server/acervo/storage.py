@@ -145,6 +145,27 @@ def move_verified(src: Path, dest: Path, expected_sha: str) -> None:
     fsync_dir(src.parent)
 
 
+def copy_verified(src: Path, dest: Path, expected_sha: str) -> None:
+    """Copy src to dest (another filesystem, e.g. the microSD): write a .part,
+    fsync, re-read it and compare the SHA-256, then rename. The source is left
+    alone; the caller decides when it may go (rule 3)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        raise FileExistsError(f"{dest} já existe")
+    part = dest.with_name(dest.name + ".part")
+    try:
+        with open(src, "rb") as fin, open(part, "wb") as fout:
+            shutil.copyfileobj(fin, fout, CHUNK)
+            fout.flush()
+            os.fsync(fout.fileno())
+        if sha256_file(part) != expected_sha:
+            raise VerificationError(f"cópia de {src.name} não confere; origem mantida")
+        os.replace(part, dest)
+    finally:
+        part.unlink(missing_ok=True)
+    fsync_dir(dest.parent)
+
+
 def unique_name(directory: Path, name: str, taken: set[str] | None = None) -> str:
     """'x.jpg' -> 'x.jpg', 'x_2.jpg', 'x_3.jpg'… avoiding files on disk and `taken`."""
     taken = taken or set()

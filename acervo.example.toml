@@ -32,8 +32,20 @@ archive_copies = 1
 # Dias na lixeira antes de apagar de vez (mínimo 30).
 trash_days = 30
 
+# Tamanho máximo da Entrada (aguardando triagem), em GB. 0 = sem limite.
+# Passou disso, o servidor recusa novos envios até a triagem liberar espaço.
+inbox_max_gb = 100
+
+# As tarefas de fundo (miniaturas, OCR…) pausam com a bateria nesta temperatura
+# e voltam 3 °C abaixo. O celular vive na tomada; isso poupa a bateria.
+max_temp_c = 40
+
 # Cartão microSD (Realme): veja docs/realme.md.
 # sd_dir = "/storage/XXXX-XXXX/Android/data/com.termux/files/acervo"
+# true = tudo o que passa pela triagem vai para o cartão (cópia conferida por
+# SHA-256); a memória interna fica só com a Entrada. Do cartão, os lotes vão
+# para o HD. false = o cartão só recebe quando a memória interna passa do alerta.
+# sd_for_library = true
 
 # Cópia diária do catálogo (as 7 mais recentes ficam).
 # catalog_backup_dir = "copias-do-catalogo"
