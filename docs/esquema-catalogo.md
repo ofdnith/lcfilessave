@@ -1,7 +1,7 @@
 # Esquema do catálogo (`catalogo.db`)
 
 O catálogo é um SQLite com busca FTS5. O SQL fica em
-[`server/acervo/migrations/`](../server/acervo/migrations/) (`0001_initial.sql`, `0002_uploads_auth_storage.sql`, `0003_healthy_drive_copies.sql`).
+[`server/acervo/migrations/`](../server/acervo/migrations/) (`0001_initial.sql` … `0007_retire_card_batch_topic.sql`).
 Na versão 3, uma cópia em HD só conta enquanto estiver saudável: se falhar numa
 verificação de saúde (ou o HD estiver marcado com problema), o servidor volta a
 não poder apagar a cópia dele.
@@ -11,6 +11,11 @@ Na versão 6, `files` ganhou `checked_at` e `check_ok`: a data e o resultado da
 última vez que a cópia no servidor (na prática, no cartão microSD) foi relida e
 conferida pelo SHA-256. Uma cópia com `check_ok = 0` deixa de contar como
 guardada em segurança: o backup diário a manda de novo, e o envio a repara.
+(Desde 01/11/2026 o cartão está aposentado e nada mais preenche `check_ok = 0`; as
+colunas ficam para os dados antigos.)
+Na versão 7 (01/11/2026), o tópico de aviso `cartao` deu lugar a `lote` (lote pronto
+para o armazenamento) em quem já recebia avisos.
+"Armazenamento" (HD, SSD, pendrive…) é o nome atual do que abaixo ainda aparece como "HD".
 Nomes de tabelas e colunas estão em inglês (regra do projeto); abaixo, a tradução.
 
 ## Princípios
@@ -69,7 +74,8 @@ Qualquer outra transição é recusada pelo banco.
 | `session_files` *(v2)* | Cada arquivo do cliente confirmado por hash numa sessão | conta uma vez, mesmo com reenvios |
 | `auth_tokens` *(v2)* | Sessões de login e tokens (Atalhos, app do Mac) | só o SHA-256 do token é guardado |
 
-Na versão 2 também entraram `files.root` (`main` = memória interna, `sd` = microSD) e
+Na versão 2 também entraram `files.root` (`main` = memória interna, `sd` = microSD — aposentado em 01/11/2026; o que restar
+nele volta sozinho para `main`, conferido) e
 `suggestions.group_key` (uma sugestão aberta por grupo: todas as capturas de tela juntas,
 uma por rajada, uma por conjunto de quase-duplicados).
 

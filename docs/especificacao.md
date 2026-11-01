@@ -10,6 +10,13 @@ documentos e outros arquivos, hospedada num celular Android antigo (Realme 9)
 dentro de casa. Não é um "drive" permanente: é uma estação de triagem. O celular
 recebe, organiza e guarda temporariamente; HDs externos são o arquivo definitivo.
 
+> **01/11/2026:** o destino definitivo passa a se chamar **armazenamento**: HD,
+> SSD, pendrive ou qualquer disco externo em exFAT (era só "HD"). O cartão
+> microSD deixa de ser memória de transição: tudo fica na memória do celular até
+> o lote. O "modo seguro" fora de casa sai: pelo Tailscale tudo funciona igual a
+> dentro de casa, sempre com senha. Web app e app do computador ganham uma
+> central de tutoriais (**Ajuda**).
+
 - **Usuário:** uma pessoa só, com iPhone e MacBook.
 - **Prioridades:** organização, facilidade e desempenho de upload, busca rápida
   estilo Google Fotos/Drive.
@@ -17,8 +24,9 @@ recebe, organiza e guarda temporariamente; HDs externos são o arquivo definitiv
   1. iPhone ou Mac envia o arquivo para o servidor (manual ou backup diário automático).
   2. O arquivo cai na **Entrada** e espera triagem.
   3. Aprovado, vai para o **Acervo**, organizado por data e tipo, com busca.
-  4. Quando o servidor juntar 5 GB (`archive_batch_gb`; era ~80 GB até 31/10/2026), um lote é transferido pelo Mac para um HD
-     numerado (VOLUME-001, 002…), com verificação por hash.
+  4. Quando o servidor juntar 5 GB (`archive_batch_gb`; era ~80 GB até 31/10/2026), um lote é transferido pelo Mac para um
+     armazenamento numerado (VOLUME-001, 002…; era "HD" até 01/11/2026), com verificação por hash.
+     Um aviso lembra também quando algo mantido está só no servidor há 14 dias (`archive_alert_days`).
   5. O servidor apaga o lote, mas mantém miniatura + metadados no catálogo: o
      acervo inteiro continua navegável e buscável, com o selo do volume onde está
      o original.
@@ -45,7 +53,7 @@ iPhone e o app nativo no Mac. Só o app do Mac acessa discos externos. O catálo
 | Interface | Svelte + Vite + TypeScript, build estático | Abas, busca, triagem, linha do tempo |
 | iPhone | PWA + app Atalhos | Uso diário, backup automático |
 | Mac | Tauri 2 (Rust) reaproveitando a interface | Tudo do web app + discos, arquivamento, verificação |
-| Acesso remoto | Tailscale | Acesso fora de casa sem abrir portas |
+| Acesso remoto | Tailscale | Acesso fora de casa sem abrir portas, com as mesmas funções de casa (desde 01/11/2026) |
 | HTTPS | DuckDNS + Let's Encrypt (acme.sh, desafio de DNS) | Endereços confiáveis sem instalar certificado; reserva: autoridade própria |
 
 Se a integração com o Copyparty se mostrar frágil, pode-se propor upload
@@ -66,7 +74,8 @@ Valem para todo o código. Nenhuma fase pode quebrá-las sem aprovação explíc
 6. **Descarte passa por lixeira** (30 dias) antes de apagar de vez.
 7. **Servidor nunca exposto à internet.** Acesso só pela rede local e pelo
    Tailscale, sempre com senha.
-8. **O acervo não depende do projeto existir:** todo HD leva um
+8. **O acervo não depende do projeto existir:** todo armazenamento (HD, SSD,
+   pendrive…; "todo HD" até 01/11/2026, renomeado com aprovação do dono) leva um
    `ABRIR-ACERVO.html` que funciona offline, em qualquer computador, sem instalar nada.
 
 ## Deduplicação — requisito central
@@ -186,7 +195,8 @@ Desenvolver e testar primeiro no MacBook; só depois instalar no Realme.
 5. **App Mac e HDs:** app Tauri, seção Dispositivos, criação de volumes,
    transferência verificada, `ABRIR-ACERVO.html`, verificação de saúde.
 6. **Busca avançada:** lugar por GPS (base de cidades offline), texto em
-   documentos, OCR, quase-duplicados por pHash, tarefas noturnas só carregando, cartão microSD.
+   documentos, OCR, quase-duplicados por pHash, tarefas noturnas só carregando, cartão microSD
+   (aposentado em 01/11/2026).
 7. **Opcional:** busca semântica ("praia", "cachorro") com modelo CLIP pequeno,
    processada de madrugada.
 
@@ -196,7 +206,7 @@ Desenvolver e testar primeiro no MacBook; só depois instalar no Realme.
 |---|---|---|
 | Processador | Snapdragon 680, 8 núcleos ARM64 | Trabalho pesado em fila, com baixa prioridade |
 | Memória | 6 ou 8 GB de RAM | Sem Docker, PostgreSQL, Redis; processar em streaming |
-| Armazenamento | 128 GB UFS 2.2 (~100 GB livres) + microSD | Memória interna só para a Entrada (limite `inbox_max_gb`); o que passa pela triagem vai para o microSD (`sd_for_library`) e do cartão para o HD; alerta em 80%; lote de arquivamento 5 GB (ajustável) |
+| Armazenamento | 128 GB UFS 2.2 (~100 GB livres); microSD aposentado em 01/11/2026 | Entrada e Acervo ficam na memória interna até o lote (Entrada sem limite por padrão, `inbox_max_gb = 0`); alerta em 80%; lote de arquivamento 5 GB (ajustável) e lembrete com 14 dias (`archive_alert_days`); o que ainda estava no cartão volta sozinho, conferido por SHA-256. Até 01/11/2026: Entrada na interna (100 GB) e Acervo no microSD (`sd_for_library`) |
 | Temperatura | Celular sempre na tomada; OCR e miniaturas esquentam | Tarefas pausam com a bateria a `max_temp_c` (40 °C) e voltam 3 °C abaixo; OCR sobre cópia de 1600 px, um núcleo |
 | Rede | Wi-Fi 5; USB-C 2.0 | Upload principal pelo Wi-Fi 5 GHz |
 | Sistema | Android 14, Realme UI 5, sem atualizações de segurança | Nunca expor portas; só LAN + Tailscale |

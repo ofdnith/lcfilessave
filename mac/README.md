@@ -3,14 +3,18 @@
 O app do computador é uma janela que mostra a mesma interface do Acervo que você usa
 no navegador, carregada direto do seu servidor, mais o que só o computador consegue fazer:
 
-- **Dispositivos:** mostra o servidor e os HDs plugados, atualizando sozinho.
-- **Volumes:** reconhece HDs do Acervo pelo arquivo `.acervo/volume.json` e
-  prepara HDs novos (só aceita HDs formatados em **exFAT**).
-- **Transferir lote:** copia os originais do servidor para o HD, **relê cada
-  arquivo do HD e confere o SHA-256** antes de avisar o servidor. Só depois disso
+- **Dispositivos:** mostra o servidor, o tamanho do próximo lote e os
+  armazenamentos plugados (HD, SSD, pendrive…), atualizando sozinho.
+- **Volumes:** reconhece armazenamentos do Acervo pelo arquivo `.acervo/volume.json` e
+  prepara armazenamentos novos (só aceita os formatados em **exFAT**).
+- **Transferir lote:** copia os originais do servidor para o armazenamento, **relê cada
+  arquivo dele e confere o SHA-256** antes de avisar o servidor. Só depois disso
   o servidor pode apagar a cópia dele (regra 3). Uma cópia que não confere é
-  apagada do HD e o arquivo continua no servidor.
-- **Verificar saúde:** relê arquivos do HD e confere os hashes.
+  apagada do armazenamento e o arquivo continua no servidor.
+- **Verificar saúde:** relê arquivos do armazenamento e confere os hashes.
+- **Ajuda:** os tutoriais do Acervo ficam em **Ajuda**, na barra lateral. Se o app
+  não conseguir conectar, a tela de conexão tem um passo a passo que funciona offline
+  (**Não conecta? Passo a passo**).
 - **Enviar pastas:** escolhe uma pasta do computador (ou arrasta arquivos para a
   janela) e envia ao servidor, conferindo o hash.
 
@@ -28,9 +32,9 @@ Na página do projeto no GitHub, abra **Releases** e baixe a versão mais nova:
   **Mais informações › Executar assim mesmo**: o aviso aparece porque o app não tem
   certificado pago da Microsoft.
 
-No Windows, os HDs aparecem pela letra (`E:`, `F:`…). Para formatar um HD em exFAT:
+No Windows, os armazenamentos aparecem pela letra (`E:`, `F:`…). Para formatar um em exFAT:
 Explorador de Arquivos › botão direito no disco › **Formatar** › Sistema de arquivos
-**exFAT** (isso apaga o HD). Com o endereço seguro configurado
+**exFAT** (isso apaga tudo o que houver nele). Com o endereço seguro configurado
 no servidor (`acervo-ctl duckdns`), não há certificado para instalar.
 
 ### Publicar uma versão nova (para quem mantém o projeto)
@@ -105,7 +109,7 @@ O app não é assinado pela Apple, então o macOS reclama na primeira vez:
    **Abrir** › **Abrir**.)
 3. O macOS pode perguntar se o Acervo pode **encontrar dispositivos na rede
    local**: clique em **Permitir** (é assim que ele fala com o servidor).
-4. Quando você plugar um HD ou escolher uma pasta, o macOS pode pedir permissão
+4. Quando você plugar um armazenamento ou escolher uma pasta, o macOS pode pedir permissão
    para acessar **volumes removíveis** ou a pasta: clique em **Permitir**.
 
 ## Encontrar o servidor
@@ -177,11 +181,11 @@ cd mac/src-tauri && ACERVO_TEST_SERVER=http://127.0.0.1:8765 cargo test -- --ign
 
 | Comando | Para quê |
 |---|---|
-| `list_disks` | HDs plugados (`/Volumes/*`), tipo de formatação, espaço, volume do Acervo |
+| `list_disks` | armazenamentos plugados (`/Volumes/*`), tipo de formatação, espaço, volume do Acervo |
 | `init_volume` | grava `.acervo/volume.json` (só exFAT; nunca sobrescreve outro volume) |
 | `copy_to_volume` | baixa, grava atomicamente, relê e confere o SHA-256; emite `copy-progress` |
-| `write_bundle_file` | grava catálogo, miniaturas e `ABRIR-ACERVO.html` no HD |
-| `verify_volume_files` | relê arquivos do HD e confere os hashes |
-| `open_on_volume` | abre um original do HD no app padrão |
+| `write_bundle_file` | grava catálogo, miniaturas e `ABRIR-ACERVO.html` no armazenamento |
+| `verify_volume_files` | relê arquivos do armazenamento e confere os hashes |
+| `open_on_volume` | abre um original do armazenamento no app padrão |
 | `pick_folder`, `scan_folder`, `hash_file`, `upload_file` | envio de pastas do Mac |
 | `get_server_url`, `get_known_servers`, `set_server_url`, `test_server`, `discover_server` | tela de endereço do servidor e procura na rede |

@@ -2,19 +2,26 @@
 
 Estação pessoal de triagem e backup de fotos, vídeos e documentos, rodando num
 celular Android antigo (Realme 9) dentro de casa. O celular **recebe, organiza e
-guarda temporariamente**; HDs externos numerados são o arquivo definitivo. O
-catálogo continua navegável e buscável mesmo depois que os originais vão para o HD.
+guarda temporariamente**; **armazenamentos** externos numerados (HD, SSD,
+pendrive… em exFAT) são o arquivo definitivo. O catálogo continua navegável e
+buscável mesmo depois que os originais vão para um armazenamento.
 
-Caminho de um arquivo: **Entrada** na memória interna (até 100 GB) → triagem →
-**Acervo no cartão microSD** (cópia conferida por SHA-256, para sobreviver à perda
-do celular, conferido todo dia e navegável por um `ABRIR-ACERVO.html`) → **HD**,
-em lotes, quando o cartão enche. Um aviso lembra da triagem com 7 dias ou 5 GB na Entrada. Veja [docs/realme.md](docs/realme.md#6-cartão-microsd--onde-fica-o-que-já-foi-triado).
+Caminho de um arquivo: **Entrada** na memória do celular → triagem → **Acervo**
+(também na memória do celular) → **armazenamento**, em lotes de 5 GB, pelo app do
+computador, com cada cópia conferida por SHA-256. Até o lote, os arquivos só
+existem no celular, por isso a interface e as notificações avisam: pouco espaço,
+lote pronto (5 GB ou algo mantido há 14 dias), Entrada esperando triagem (7 dias
+ou 5 GB) e backup diário atrasado. O cartão microSD deixou de ser usado em
+01/11/2026 (veja [docs/realme.md](docs/realme.md#cartão-microsd-antigo-aposentado-em-01112026)).
+
+Tutoriais passo a passo de tudo ficam dentro do próprio Acervo, em **Ajuda**
+(`#/ajuda`, pela barra lateral ou por Ajustes no iPhone).
 
 ```
- iPhone (web app + Atalhos) ─┐                         ┌─ HD VOLUME-001 (exFAT)
+ iPhone (web app + Atalhos) ─┐                         ┌─ VOLUME-001 (HD, SSD… exFAT)
                              ├─► Realme (servidor) ◄───┤  originais + ABRIR-ACERVO.html
- Mac (app + navegador) ──────┘   catálogo, miniaturas  └─ HD VOLUME-002 …
-                                    Entrada → Acervo → HD
+ Mac (app + navegador) ──────┘   catálogo, miniaturas  └─ VOLUME-002 …
+                              Entrada → Acervo → armazenamento
 ```
 
 | Guia | Para quê |
@@ -22,7 +29,7 @@ em lotes, quando o cartão enche. Um aviso lembra da triagem com 7 dias ou 5 GB 
 | [docs/realme.md](docs/realme.md) | Instalar o servidor no Realme (Termux) |
 | [docs/migrar.md](docs/migrar.md) | Mudar o Acervo para um mini PC (ou outra máquina) |
 | [docs/iphone.md](docs/iphone.md) | Endereço seguro, web app, Atalhos e backup diário |
-| [mac/README.md](mac/README.md) | Baixar ou compilar o app do Mac e do Windows (HDs, Esvaziar iPhone) |
+| [mac/README.md](mac/README.md) | Baixar ou compilar o app do Mac e do Windows (armazenamentos, Esvaziar iPhone) |
 | [docs/especificacao.md](docs/especificacao.md) | O plano do projeto (fonte da verdade) |
 | [docs/api.md](docs/api.md) | A API do servidor |
 | [docs/esquema-catalogo.md](docs/esquema-catalogo.md) | O `catalogo.db`, tabela por tabela |
@@ -37,25 +44,35 @@ em lotes, quando o cartão enche. Um aviso lembra da triagem com 7 dias ou 5 GB 
 | 2 — Triagem | Entrada, lote, modo rápido, lixeira de 30 dias, sugestões | ✅ |
 | 3 — Realme | `instalar.sh`, início automático, supervisor, senha, HTTPS, Tailscale | ✅ (falta rodar no aparelho) |
 | 4 — iPhone | Atalho manual, backup diário, Esvaziar iPhone, PWA | ✅ (atalhos montados à mão, guia passo a passo) |
-| 5 — App Mac e HDs | Tauri, Dispositivos, volumes, transferência verificada, `ABRIR-ACERVO.html`, saúde | ✅ (compilar no Mac) |
-| 6 — Busca avançada | Lugar por GPS offline, texto de documentos, OCR só carregando, quase-duplicados (pHash), microSD | ✅ |
+| 5 — App Mac e armazenamentos | Tauri, Dispositivos, volumes, transferência verificada, `ABRIR-ACERVO.html`, saúde | ✅ (compilar no Mac) |
+| 6 — Busca avançada | Lugar por GPS offline, texto de documentos, OCR só carregando, quase-duplicados (pHash) | ✅ (microSD aposentado em 01/11/2026) |
 | 7 — Opcional | Busca semântica (CLIP) | ⏸ não feita — veja abaixo |
 
 **Versão 0.2 — melhorias:**
 
 | Melhoria | O que muda |
 |---|---|
-| Prévias médias | Toda foto e vídeo guarda uma prévia de 1024 px (~100 KB) para sempre: o arquivado no HD continua bonito de ver, e fora de casa carrega rápido |
+| Prévias médias | Toda foto e vídeo guarda uma prévia de 1024 px (~100 KB) para sempre: o arquivado num armazenamento continua bonito de ver, e fora de casa carrega rápido |
 | Triagem em um toque | "Manter tudo, menos as sugestões": só o que é duplicado, captura de tela ou WhatsApp fica para você decidir |
 | Neste dia, Lugares, Álbuns | Fotos do mesmo dia em anos anteriores; mapa e lista de cidades; álbuns que nunca apagam nada |
 | Atalhos sem complicação | Token criado pela interface; backup diário com 5 ações; links do iCloud dos atalhos prontos |
-| Avisos no iPhone | Backup atrasado, servidor cheio, problema num HD, resumo do backup (Web Push, sem abrir portas) |
-| Modo seguro fora de casa | Pelo Tailscale dá para ver e enviar, mas não apagar nem mexer em HDs |
+| Avisos no iPhone | Backup atrasado, pouco espaço, lote pronto, Entrada esperando, problema num armazenamento, resumo do backup (Web Push, sem abrir portas) |
 | Migração | `acervo migrar` leva tudo para um mini PC conferindo cada arquivo; instalador para Linux com serviço do sistema |
 | App para Windows e Releases | O app do computador agora também roda no Windows; o GitHub compila Mac e Windows e publica em Releases a cada tag `app-v*` |
 | Entrada com fotos inteiras | A grade da Entrada mostra cada foto no formato dela, sem cortar (botão para voltar aos quadrados; o Acervo também tem) |
 | Modo rápido mais leve | Cartão no formato da foto, prévia leve em vez do original, ações sem esperar o servidor, próximas fotos pré-carregadas, arrastar também com o mouse |
-| Aviso de HD em 5 GB | O lote para HD passou de 80 GB para 5 GB (`archive_batch_gb`) em instalações novas; quem já instalou troca a linha `archive_batch_gb` no `acervo.toml`. Um item maior que o lote (vídeo 4K longo) vai sozinho num lote próprio |
+| Lote de 5 GB | O lote para o armazenamento passou de 80 GB para 5 GB (`archive_batch_gb`) em instalações novas; quem já instalou troca a linha `archive_batch_gb` no `acervo.toml`. Um item maior que o lote (vídeo 4K longo) vai sozinho num lote próprio |
+
+**01/11/2026 — armazenamento, avisos e ajuda:**
+
+| Mudança | O que muda |
+|---|---|
+| Sem cartão microSD | Nada novo vai para o cartão (`sd_for_library` não existe mais). O que ainda estiver nele volta sozinho para a memória do celular, conferido por SHA-256; quando não há mais nada, apague a linha `sd_dir` |
+| "Armazenamento" no lugar de "HD" | O destino dos lotes pode ser qualquer disco externo em exFAT: HD, SSD, pendrive |
+| Avisos novos | Faixas no topo do app e notificações com os mesmos textos: pouco espaço no celular, lote pronto para o armazenamento (`archive_alert_days`, padrão 14), Entrada esperando, backup atrasado. A Entrada não tem mais limite por padrão (`inbox_max_gb = 0`) |
+| Fora de casa igual a em casa | O modo seguro (`remote_mode`) saiu: pelo Tailscale dá para fazer tudo, sempre com senha |
+| Ajuda | Central de tutoriais em **Ajuda** (web, iPhone e app do computador); a tela de conexão do app tem um passo a passo offline |
+| Tela cheia no iPhone | Correções de áreas seguras (notch, barra inferior), faixa atrás do relógio e altura real da tela |
 
 **Fase 7:** o modelo CLIP precisa do `onnxruntime`, que não tem versão para o
 Termux/Android; no Snapdragon 680 cada foto levaria segundos. A fila de tarefas
@@ -78,7 +95,7 @@ Sem senha definida, o servidor só aceita este computador.
 
 Os testes do servidor incluem os cinco obrigatórios da especificação (mesmo
 arquivo com nome diferente; mesmo nome com conteúdo diferente; arquivo já
-arquivado em HD; upload interrompido e retomado; dois uploads simultâneos) e
+arquivado num armazenamento; upload interrompido e retomado; dois uploads simultâneos) e
 conferem que o próprio banco recusa apagar um arquivo sem cópia verificada.
 Uma revisão independente de segurança dos dados encontrou 19 problemas (dois
 deles podiam apagar a única cópia de uma foto); todos foram corrigidos e cada um
@@ -97,12 +114,12 @@ o OCR lê uma cópia de 1600 px com um núcleo, e os pHash ficam em memória.
 |---|---|
 | 1. Backup diário nunca apaga do iPhone | Os atalhos não têm ação de apagar; o servidor não tem como apagar no iPhone |
 | 2. Backup diário cai na Entrada | Todo item novo nasce `inbox` (padrão do banco) |
-| 3. Nada é apagado sem verificação por hash | Gatilhos no banco recusam tirar um arquivo do servidor sem cópia verificada em HD; cópia entre discos relê o hash antes de apagar a origem |
+| 3. Nada é apagado sem verificação por hash | Gatilhos no banco recusam tirar um arquivo do servidor sem cópia verificada num armazenamento; cópia entre discos relê o hash antes de apagar a origem |
 | 4. Nada repetido | `sha256` único no catálogo inteiro, trava por hash no servidor |
 | 5. Originais intactos | Originais só são lidos; miniaturas e prévias são arquivos separados |
 | 6. Lixeira de 30 dias | `trash_days` não aceita menos de 30; purga só sai da lixeira |
 | 7. Nunca exposto, sempre com senha | Servidor recusa escutar na rede sem senha; acesso só LAN + Tailscale |
-| 8. `ABRIR-ACERVO.html` em todo HD | Gerado a cada transferência; funciona offline em qualquer navegador |
+| 8. `ABRIR-ACERVO.html` em todo armazenamento | Gerado a cada transferência; funciona offline em qualquer navegador |
 
 ## Estrutura
 
@@ -112,7 +129,7 @@ lcfilessave/
 │   ├── acervo/      código (ingest, library, jobs, api/, migrations/ …)
 │   └── tests/
 ├── web/             interface Svelte (navegador, PWA do iPhone, app do Mac)
-├── mac/             app Tauri do Mac (discos, transferência, Esvaziar iPhone)
+├── mac/             app Tauri do Mac/Windows (armazenamentos, transferência, Esvaziar iPhone)
 ├── scripts/         setup-mac.sh, dev.sh, test.sh, termux/ (Realme), linux/ (mini PC)
 └── docs/
 ```
@@ -131,11 +148,4 @@ acervo-dados/
 ├── tmp/           uploads em andamento
 └── catalogo.db
 
-cartão microSD (sd_dir)
-├── acervo/        AAAA/MM/… — o que já passou pela triagem
-├── lixeira/       descartes de itens que estavam no cartão
-├── acervo-resgate/ cópia diária do catálogo + LEIA-ME.txt
-├── corrompidos/   cópias que falharam na verificação (nunca apagadas)
-├── .acervo/miniaturas/
-└── ABRIR-ACERVO.html  navegador offline do cartão
 ```
