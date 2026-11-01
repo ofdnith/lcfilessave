@@ -23,7 +23,9 @@ Files, all under <data>/certificados/:
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import fcntl
 import ipaddress
 import json
 import logging
@@ -46,6 +48,7 @@ log = logging.getLogger(__name__)
 SETTINGS_FILE = "duckdns.json"
 PUBLIC_DIR = "publico"
 STATE_FILE = "estado.json"
+LOCK_FILE = ".trava"
 DUCKDNS_SUFFIX = ".duckdns.org"
 DUCKDNS_API = "https://www.duckdns.org/update"
 
@@ -183,7 +186,9 @@ def _source_address(target: str) -> str | None:
 
 
 def detect_addresses(source: Callable[[str], str | None] = _source_address) -> dict[str, str | None]:
-    """{"lan": Wi-Fi/Ethernet address or None, "tailscale": 100.x address or None}."""
+    """{"lan": Wi-Fi/Ethernet address or None, "tailscale": 100.x address or None,
+    "internet": the address used to reach the internet}."""
+    internet = source("8.8.8.8")
     lan = None
     for target in ("8.8.8.8", "1.1.1.1", "192.168.0.1"):
         ip = source(target)
@@ -195,7 +200,46 @@ def detect_addresses(source: Callable[[str], str | None] = _source_address) -> d
             break
     ts = source(TAILSCALE_DNS)
     tailscale = ts if ts and ipaddress.ip_address(ts) in TAILSCALE_NET else None
-    return {"lan": lan, "tailscale": tailscale}
+    return {"lan": lan, "tailscale": tailscale, "internet": internet}
+
+
+_LAN_BLOCKS = [ipaddress.ip_network(n) for n in ("192.168.0.0/16", "172.16.0.0/12")]
+
+
+def same_network(old: str, new: str) -> bool:
+    """Is `new` plausibly the same home network as `old`? A new DHCP lease stays in
+    the same block; on mobile data the operator hands out 10.x (and 100.64/10)
+    addresses, which must not replace the Wi-Fi one."""
+    a, b = ipaddress.ip_address(old), ipaddress.ip_address(new)
+    for block in _LAN_BLOCKS:
+        if a in block and b in block:
+            return True
+    ten = ipaddress.ip_network("10.0.0.0/8")
+    if a in ten and b in ten:
+        return a.packed[:2] == b.packed[:2]  # 10.x routers keep their /16
+    return False
+
+
+def _automatic_ip(role: str, addrs: dict[str, str | None], published: str | None) -> str | None:
+    """The address the background upkeep may publish for one name, or None.
+
+    The owner runs `acervo duckdns` on the home Wi-Fi; afterwards the upkeep only
+    follows changes that look like the same network, so a phone on mobile data
+    (Wi-Fi off) never points the home name at the operator's network, and an
+    operator 100.64/10 address (Tailscale off) never passes for Tailscale.
+    Tailscale addresses don't change; when both lookups give the same 100.x
+    address (an exit node, or no Tailscale at all), nothing is changed."""
+    if role == "home":
+        ip = addrs.get("lan")
+        if ip and published and ip != published and not same_network(published, ip):
+            log.warning("O IP do Wi-Fi mudou de %s para %s (outra rede?). Não mudei o endereço de casa; "
+                        "se o celular mudou mesmo de rede, rode:  acervo-ctl duckdns", published, ip)
+            return None
+        return ip
+    ip = addrs.get("tailscale")
+    if ip and ip == addrs.get("internet"):
+        return None
+    return ip
 
 
 def duckdns_update(token: str, name: str, ip: str, opener: Callable = urllib.request.urlopen) -> bool:
@@ -250,8 +294,10 @@ def cert_valid(cfg: Config, fqdn: str, now: dt.datetime | None = None) -> bool:
 
 def _acme_base(cfg: Config) -> list[str]:
     home = str(cfg.acme_home)
+    # No --log: acme.sh writes the DuckDNS token into its debug log, and it saves
+    # the log setting for every later run. Its output is captured instead.
     return ["sh", str(acme_script(cfg)), "--home", home, "--config-home", str(cfg.acme_home / "data"),
-            "--no-color", "--log", str(cfg.acme_home / "acervo.log")]
+            "--no-color"]
 
 
 def _acme_env(dd: DuckDNS) -> dict[str, str]:
@@ -261,8 +307,12 @@ def _acme_env(dd: DuckDNS) -> dict[str, str]:
 
 
 def issue(cfg: Config, dd: DuckDNS, fqdn: str, run: Runner = subprocess.run) -> bool:
-    """Gets (or re-installs) the certificate for one name. Takes 1 to 3 minutes:
-    acme.sh waits for the TXT record to spread before Let's Encrypt checks it."""
+    """Gets, renews or re-installs the certificate for one name. A new one takes 1
+    to 3 minutes: acme.sh waits for the TXT record to spread before Let's Encrypt
+    checks it. When acme.sh already has a certificate that is not due yet, it
+    answers 2 and only copies the files in place; when it has no record of the
+    name (a new server after `acervo migrar`, acme.sh reinstalled), it gets a new
+    one. So this one call also renews."""
     if not _FQDN_RE.match(fqdn):
         raise PublicNameError(f"Nome inválido: {fqdn}")
     crt, key = cert_paths(cfg, fqdn)
@@ -294,17 +344,24 @@ def issue(cfg: Config, dd: DuckDNS, fqdn: str, run: Runner = subprocess.run) -> 
     return cert_valid(cfg, fqdn)
 
 
-def renew_due(cfg: Config, dd: DuckDNS, run: Runner = subprocess.run) -> bool:
-    """acme.sh renews whatever is due and copies the new files in place."""
+def forget_acme_token(cfg: Config) -> None:
+    """acme.sh keeps the DuckDNS token in its own settings (SAVED_DuckDNS_Token)
+    for renewals. When the trusted address is turned off, it goes too, with any
+    log an older version left behind."""
+    conf = cfg.acme_home / "data" / "account.conf"
     try:
-        result = run(_acme_base(cfg) + ["--cron"], env=_acme_env(dd), capture_output=True, text=True, timeout=1800)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        log.warning("Renovação dos certificados falhou: %s", exc)
-        return False
-    if result.returncode not in (0, 2):
-        log.warning("Renovação dos certificados falhou (código %s)", result.returncode)
-        return False
-    return True
+        lines = conf.read_text("utf-8").splitlines(keepends=True)
+    except OSError:
+        lines = None
+    if lines is not None:
+        kept = [ln for ln in lines if not ln.lstrip().startswith(("SAVED_DuckDNS_Token=", "LOG_FILE=", "LOG_LEVEL="))]
+        if kept != lines:
+            tmp = conf.with_name(conf.name + ".tmp")
+            tmp.write_text("".join(kept), "utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, conf)
+    for log_file in (cfg.acme_home / "acervo.log", cfg.acme_home / "data" / "acme.sh.log"):
+        log_file.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +369,26 @@ def renew_due(cfg: Config, dd: DuckDNS, run: Runner = subprocess.run) -> bool:
 # ---------------------------------------------------------------------------
 
 _upkeep_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def acme_lock(cfg: Config, blocking: bool = True):
+    """One acme.sh at a time for this data folder, across processes: the server's
+    upkeep thread and `acervo duckdns` in a terminal. DuckDNS keeps a single TXT
+    record per name, so two runs would erase each other's challenge. Yields
+    whether the lock was taken (always True when blocking)."""
+    folder = public_dir(cfg)
+    folder.mkdir(parents=True, exist_ok=True)
+    with open(folder / LOCK_FILE, "a+") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def upkeep(cfg: Config, *, now: dt.datetime | None = None, run: Runner = subprocess.run,
@@ -325,61 +402,80 @@ def upkeep(cfg: Config, *, now: dt.datetime | None = None, run: Runner = subproc
     if not _upkeep_lock.acquire(blocking=False):
         return {"configured": True, "busy": True}
     try:
-        now = now or dt.datetime.now(dt.timezone.utc)
-        state = _load_state(cfg)
-        addrs = detect()
-        report: dict = {"configured": True, "addresses": addrs, "dns": {}, "issued": [], "renewed": False}
-
-        for role, fqdn in dd.names():
-            ip = addrs["lan"] if role == "home" else addrs["tailscale"]
-            if not ip:
-                continue
-            key = f"dns:{fqdn}"
-            last = state.get(key, {})
-            fresh = last.get("ip") == ip and _age(last.get("at"), now) < RECHECK_DNS_AFTER
-            if fresh:
-                continue
-            ok = duckdns_update(dd.token, fqdn[: -len(DUCKDNS_SUFFIX)], ip, opener=opener)
-            report["dns"][fqdn] = ok
-            if ok:
-                state[key] = {"ip": ip, "at": now.isoformat()}
-                log.info("DuckDNS: %s -> %s", fqdn, ip)
-        _save_state(cfg, state)
-
-        if not acme_available(cfg):
-            report["acme"] = False
-            return report
-
-        renew = False
-        for _, fqdn in dd.names():
-            crt, key_file = cert_paths(cfg, fqdn)
-            expiry = cert_expiry(crt) if key_file.exists() else None
-            if expiry is not None and expiry - now > RENEW_BEFORE:
-                continue
-            key = f"acme:{fqdn}"
-            if _age(state.get(key), now) < RETRY_ISSUE_AFTER:
-                continue  # tried recently; don't hammer Let's Encrypt
-            state[key] = now.isoformat()
-            _save_state(cfg, state)
-            if expiry is None:
-                log.info("Pedindo o certificado de %s ao Let's Encrypt…", fqdn)
-                if issue(cfg, dd, fqdn, run=run):
-                    report["issued"].append(fqdn)
-                    log.info("Certificado de %s pronto", fqdn)
-            else:
-                renew = True
-        if renew:  # acme.sh renews everything that is due in one go
-            report["renewed"] = renew_due(cfg, dd, run=run)
-        return report
+        with acme_lock(cfg, blocking=False) as got:
+            if not got:  # `acervo duckdns` is running in a terminal
+                return {"configured": True, "busy": True}
+            return _upkeep_locked(cfg, dd, now=now, run=run, opener=opener, detect=detect)
     finally:
         _upkeep_lock.release()
 
 
-def mark_attempt(cfg: Config, fqdn: str, now: dt.datetime | None = None) -> None:
-    """Tells the background upkeep that someone is getting this certificate now
-    (`acervo duckdns`), so the two never run acme.sh for the same name at once."""
+def _upkeep_locked(cfg: Config, dd: DuckDNS, *, now, run, opener, detect) -> dict:
+    now = now or dt.datetime.now(dt.timezone.utc)
     state = _load_state(cfg)
-    state[f"acme:{fqdn}"] = (now or dt.datetime.now(dt.timezone.utc)).isoformat()
+    addrs = detect()
+    report: dict = {"configured": True, "addresses": addrs, "dns": {}, "issued": [], "renewed": []}
+
+    for role, fqdn in dd.names():
+        key = f"dns:{fqdn}"
+        last = state.get(key, {})
+        ip = _automatic_ip(role, addrs, last.get("ip"))
+        if not ip:
+            continue
+        fresh = last.get("ip") == ip and _age(last.get("at"), now) < RECHECK_DNS_AFTER
+        if fresh:
+            continue
+        ok = duckdns_update(dd.token, fqdn[: -len(DUCKDNS_SUFFIX)], ip, opener=opener)
+        report["dns"][fqdn] = ok
+        if ok:
+            state[key] = {"ip": ip, "at": now.isoformat()}
+            log.info("DuckDNS: %s -> %s", fqdn, ip)
+    _save_state(cfg, state)
+
+    if not acme_available(cfg):
+        report["acme"] = False
+        return report
+
+    for _, fqdn in dd.names():
+        crt, key_file = cert_paths(cfg, fqdn)
+        expiry = cert_expiry(crt) if key_file.exists() else None
+        if expiry is not None and expiry - now > RENEW_BEFORE:
+            continue
+        key = f"acme:{fqdn}"
+        if _age(state.get(key), now) < RETRY_ISSUE_AFTER:
+            continue  # tried recently; don't hammer Let's Encrypt
+        state[key] = now.isoformat()
+        _save_state(cfg, state)
+        log.info("%s o certificado de %s…", "Pedindo" if expiry is None else "Renovando", fqdn)
+        if not issue(cfg, dd, fqdn, run=run):
+            continue
+        after = cert_expiry(crt)
+        if expiry is None:
+            report["issued"].append(fqdn)
+            log.info("Certificado de %s pronto", fqdn)
+        elif after is not None and after > expiry:
+            report["renewed"].append(fqdn)
+            log.info("Certificado de %s renovado", fqdn)
+        # else: acme.sh says it's not due yet; tried again in a few hours
+    return report
+
+
+def mark_attempt(cfg: Config, fqdns: list[str], now: dt.datetime | None = None) -> None:
+    """Records that these certificates are being requested now (`acervo duckdns`,
+    which holds `acme_lock`), so the upkeep waits its usual few hours before
+    trying again after a failure."""
+    state = _load_state(cfg)
+    stamp = (now or dt.datetime.now(dt.timezone.utc)).isoformat()
+    for fqdn in fqdns:
+        state[f"acme:{fqdn}"] = stamp
+    _save_state(cfg, state)
+
+
+def record_dns(cfg: Config, fqdn: str, ip: str, now: dt.datetime | None = None) -> None:
+    """Records an address `acervo duckdns` just published, so the upkeep compares
+    later changes against it."""
+    state = _load_state(cfg)
+    state[f"dns:{fqdn}"] = {"ip": ip, "at": (now or dt.datetime.now(dt.timezone.utc)).isoformat()}
     _save_state(cfg, state)
 
 

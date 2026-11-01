@@ -12,7 +12,9 @@ O que **não** muda:
 - **A senha e os tokens dos Atalhos.** Estão dentro do catálogo e vão junto.
 - **O certificado que você instalou no iPhone e no Mac.** A autoridade vai junto,
   então ninguém precisa reinstalar nada.
-- **O endereço**, se você usar o nome fixo do Tailscale (passo 0).
+- **O endereço.** Com o endereço seguro (`acervo-ctl duckdns`), os dois nomes vão
+  junto e passam a apontar para o mini PC sozinhos; o servidor antigo, travado, para
+  de mexer neles. Sem ele, use o nome fixo do Tailscale (passo 0).
 
 O servidor antigo **nunca apaga nada**. Durante e depois da cópia ele fica
 "só para consulta", até você desligá-lo.
@@ -23,17 +25,25 @@ muito mais rápido.
 
 ---
 
-## 0. Uma vez, já agora: nome fixo no Tailscale
+## 0. Uma vez, já agora: um endereço que não muda
 
 Faça isso mesmo que a mudança esteja longe. É o que permite trocar o servidor
 sem mexer no iPhone.
+
+O melhor é o **endereço seguro** (`acervo-ctl duckdns`, veja `docs/iphone.md`,
+passo 2): use os dois nomes dele no web app do iPhone, nos Atalhos e no app do Mac.
+Nada mais a fazer neste passo; pule para o passo 1.
+
+Sem o endereço seguro, use o nome fixo do Tailscale:
 
 1. Entre em **login.tailscale.com** → **Machines**.
 2. No Realme, clique em **⋯** → **Edit machine name…** → escreva **`acervo`**.
 3. O endereço passa a ser `https://acervo.<sua-rede>.ts.net:8765`. Use esse
    endereço no web app do iPhone, nos Atalhos e no app do Mac. Evite o IP.
-4. No Termux do Realme, rode de novo `bash ~/acervo/scripts/termux/instalar.sh`
-   e informe esse nome, para o certificado passar a valer para ele.
+4. No Realme, acrescente esse nome ao `tls_names` do `~/acervo/acervo.toml`, rode
+   `acervo-ctl stop`, `~/acervo/server/.venv/bin/acervo --config ~/acervo/acervo.toml certificado`
+   e `acervo-ctl start`,
+   para o certificado passar a valer para ele.
 
 ## 1. Antes: esvaziar o servidor antigo (recomendado)
 
@@ -106,7 +116,9 @@ sozinho quando o mini PC liga) e mostra o endereço.
    **"Problemas: 0"**. Se houver problemas, a lista mostra quais arquivos; rode
    o `migrar` de novo. Um arquivo que já estava corrompido no Realme aparece
    aqui, e não é copiado estragado.
-2. No iPhone, abra `https://acervo.<sua-rede>.ts.net:8765`. Navegue, abra
+2. No iPhone, abra o endereço de sempre (o de casa, ex.:
+   `https://fulano-casa.duckdns.org:8765`, ou `https://acervo.<sua-rede>.ts.net:8765`).
+   Em até um minuto ele já aponta para o mini PC. Navegue, abra
    fotos recentes e antigas, faça uma busca, veja a Entrada.
 3. Em **Ajustes**, confira que o servidor mostra o nome do mini PC.
 4. Rode o **Backup diário** manualmente no Atalhos e veja chegar na Entrada.

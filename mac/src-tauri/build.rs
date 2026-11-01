@@ -5,8 +5,10 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_server_url",
+            "get_known_servers",
             "set_server_url",
             "test_server",
+            "discover_server",
             "list_disks",
             "init_volume",
             "copy_to_volume",

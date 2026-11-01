@@ -28,6 +28,8 @@ pub struct Found {
     /// Trusted addresses the server reported and that check out (see `addresses`).
     pub home: Option<String>,
     pub away: Option<String>,
+    /// The same server this Mac already used (see `mark_known`).
+    pub known: bool,
 }
 
 /// The Mac's own private IPv4 address on the local network, if any. A UDP
@@ -154,10 +156,36 @@ pub async fn sweep(port: u16) -> Result<Vec<Found>, String> {
             version: body.get("version").and_then(|v| v.as_str()).map(str::to_string),
             home,
             away,
+            known: false,
         });
     }
+    // Stable order, so "Procurar de novo" doesn't shuffle the list.
     found.sort_by(|a, b| a.url.cmp(&b.url));
     Ok(found)
+}
+
+/// Marks the servers this Mac already used, by the addresses it saved.
+///
+/// Anyone on a hotel or office Wi-Fi can answer as an "Acervo" and report a
+/// DuckDNS name of their own with a real certificate, so a new name is never
+/// trusted just because it was found. Only a saved trusted name counts. A
+/// saved IP alone can be taken by another device on another network: such a
+/// match keeps only the IP, which the app then checks with normal certificate
+/// verification, and drops the names that device reported.
+pub fn mark_known(found: &mut [Found], saved: &[String]) {
+    for f in found.iter_mut() {
+        let named = [&f.home, &f.away]
+            .into_iter()
+            .flatten()
+            .any(|u| saved.contains(u));
+        if named {
+            f.known = true;
+        } else if saved.contains(&f.url) {
+            f.known = true;
+            f.home = None;
+            f.away = None;
+        }
+    }
 }
 
 /// True when the request failed because of the server's certificate.
@@ -207,6 +235,37 @@ mod tests {
         let evil = json!({"addresses": {"home": "https://x.duckdns.org/caminho?roubar=1"}});
         assert_eq!(reported(&evil, "home"), None);
         assert_eq!(reported(&json!({}), "home"), None);
+    }
+
+    fn found(url: &str, home: Option<&str>, away: Option<&str>) -> Found {
+        Found {
+            url: url.into(),
+            version: None,
+            home: home.map(Into::into),
+            away: away.map(Into::into),
+            known: false,
+        }
+    }
+
+    #[test]
+    fn only_saved_names_make_a_server_known() {
+        let saved = vec![
+            "https://fulano-casa.duckdns.org:8765".to_string(),
+            "https://fulano.duckdns.org:8765".to_string(),
+            "https://192.168.1.104:8765".to_string(),
+        ];
+        let mut list = vec![
+            found("https://192.168.1.50:8765", Some("https://fulano-casa.duckdns.org:8765"), None),
+            found("https://192.168.0.9:8765", Some("https://impostor.duckdns.org:8765"), None),
+            // Same IP as at home, on another network: keep the IP, drop its names.
+            found("https://192.168.1.104:8765", Some("https://impostor.duckdns.org:8765"), Some("https://x.duckdns.org:8765")),
+        ];
+        mark_known(&mut list, &saved);
+        assert!(list[0].known);
+        assert_eq!(list[0].home.as_deref(), Some("https://fulano-casa.duckdns.org:8765"));
+        assert!(!list[1].known);
+        assert!(list[2].known);
+        assert_eq!((list[2].home.as_deref(), list[2].away.as_deref()), (None, None));
     }
 
     #[tokio::test]

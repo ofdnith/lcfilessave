@@ -76,8 +76,8 @@ class FakeAcme:
         return subprocess.CompletedProcess(cmd, self.returncode, "", "")
 
 
-def addrs(lan="192.168.1.104", tailscale="100.71.3.9"):
-    return lambda: {"lan": lan, "tailscale": tailscale}
+def addrs(lan="192.168.1.104", tailscale="100.71.3.9", internet=None):
+    return lambda: {"lan": lan, "tailscale": tailscale, "internet": internet or lan}
 
 
 # --- names, token, settings -------------------------------------------------------------
@@ -114,17 +114,20 @@ def test_settings_are_private_to_the_owner(https_cfg):
 
 def test_addresses_are_found_from_the_routing_table():
     routes = {"8.8.8.8": "192.168.1.104", "100.100.100.100": "100.71.3.9"}
-    assert pn.detect_addresses(routes.get) == {"lan": "192.168.1.104", "tailscale": "100.71.3.9"}
+    assert pn.detect_addresses(routes.get) == {"lan": "192.168.1.104", "tailscale": "100.71.3.9",
+                                               "internet": "192.168.1.104"}
 
 
 def test_tailscale_off_or_exit_node_does_not_fool_detection():
     # Tailscale off: 100.100.100.100 leaves through the Wi-Fi, so the source is the LAN address.
     routes = {"8.8.8.8": "192.168.1.104", "100.100.100.100": "192.168.1.104"}
-    assert pn.detect_addresses(routes.get) == {"lan": "192.168.1.104", "tailscale": None}
+    assert pn.detect_addresses(routes.get) == {"lan": "192.168.1.104", "tailscale": None,
+                                               "internet": "192.168.1.104"}
     # Exit node on: the internet goes through Tailscale; the LAN address comes from the router.
     routes = {"8.8.8.8": "100.71.3.9", "1.1.1.1": "100.71.3.9", "192.168.0.1": "192.168.1.104",
               "100.100.100.100": "100.71.3.9"}
-    assert pn.detect_addresses(routes.get) == {"lan": "192.168.1.104", "tailscale": "100.71.3.9"}
+    assert pn.detect_addresses(routes.get) == {"lan": "192.168.1.104", "tailscale": "100.71.3.9",
+                                               "internet": "100.71.3.9"}
 
 
 def test_duckdns_points_each_name_at_its_address_and_only_again_when_it_changes(https_cfg):
@@ -184,13 +187,101 @@ def test_failed_certificate_waits_hours_before_trying_again(https_cfg):
 
 
 def test_certificate_close_to_expiry_is_renewed(https_cfg):
+    # Also the case where acme.sh has no record of the name (new server after a
+    # migration, acme.sh reinstalled): --issue simply gets a new certificate.
     pn.save(https_cfg, pn.DuckDNS(TOKEN, "fulano-casa", "fulano"))
-    for name in ("fulano-casa.duckdns.org", "fulano.duckdns.org"):
+    names = ["fulano-casa.duckdns.org", "fulano.duckdns.org"]
+    for name in names:
         write_cert(*pn.cert_paths(https_cfg, name), name, NOW + dt.timedelta(days=20))
     acme = FakeAcme()
     report = pn.upkeep(https_cfg, now=NOW, run=acme, opener=FakeDuckDNS(), detect=addrs())
-    assert report["renewed"] and [c for c in acme.calls if "--cron" in c] == [acme.calls[0]]
-    assert len(acme.calls) == 1  # one acme.sh run renews both
+    assert sorted(report["renewed"]) == sorted(names)
+    assert [c[c.index("-d") + 1] for c in acme.calls if "--issue" in c] == names
+    assert not any("--cron" in c for c in acme.calls)
+
+
+def test_expired_certificate_is_replaced_even_without_acme_records(https_cfg):
+    pn.save(https_cfg, pn.DuckDNS(TOKEN, "fulano-casa"))
+    name = "fulano-casa.duckdns.org"
+    write_cert(*pn.cert_paths(https_cfg, name), name, NOW - dt.timedelta(days=3))
+    pn.upkeep(https_cfg, now=NOW, run=FakeAcme(), opener=FakeDuckDNS(), detect=addrs())
+    assert pn.cert_valid(https_cfg, name, NOW)
+
+
+def test_renewal_not_due_yet_for_acme_is_retried_later(https_cfg):
+    pn.save(https_cfg, pn.DuckDNS(TOKEN, "fulano-casa"))
+    name = "fulano-casa.duckdns.org"
+    write_cert(*pn.cert_paths(https_cfg, name), name, NOW + dt.timedelta(days=29))
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        # acme.sh: not due yet (2), then --install-cert copies the same certificate.
+        return subprocess.CompletedProcess(cmd, 2 if "--issue" in cmd else 0, "", "")
+
+    report = pn.upkeep(https_cfg, now=NOW, run=run, opener=FakeDuckDNS(), detect=addrs())
+    assert report["renewed"] == [] and len(calls) == 2
+    pn.upkeep(https_cfg, now=NOW + dt.timedelta(hours=1), run=run, opener=FakeDuckDNS(), detect=addrs())
+    assert len(calls) == 2  # waits a few hours
+    pn.upkeep(https_cfg, now=NOW + dt.timedelta(hours=7), run=run, opener=FakeDuckDNS(), detect=addrs())
+    assert len(calls) == 4
+
+
+def test_acme_never_logs_to_a_file(https_cfg):
+    # acme.sh's debug log would contain the DuckDNS token, and --log is remembered.
+    pn.save(https_cfg, pn.DuckDNS(TOKEN, "fulano-casa"))
+    acme = FakeAcme()
+    pn.upkeep(https_cfg, now=NOW, run=acme, opener=FakeDuckDNS(), detect=addrs())
+    assert acme.calls and not any(a.startswith("--log") for c in acme.calls for a in c)
+
+
+def test_turning_off_forgets_the_token_kept_by_acme(https_cfg):
+    conf = https_cfg.acme_home / "data" / "account.conf"
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text("ACCOUNT_EMAIL=''\nSAVED_DuckDNS_Token='" + TOKEN + "'\nLOG_FILE='/x/acme.sh.log'\n"
+                    "UPGRADE_HASH='abc'\n")
+    (https_cfg.acme_home / "acervo.log").write_text("token=" + TOKEN)
+    pn.forget_acme_token(https_cfg)
+    assert TOKEN not in conf.read_text()
+    assert "UPGRADE_HASH='abc'" in conf.read_text() and "LOG_FILE" not in conf.read_text()
+    assert not (https_cfg.acme_home / "acervo.log").exists()
+    pn.forget_acme_token(https_cfg)  # nothing left: no error
+
+
+def test_terminal_and_server_never_run_acme_at_the_same_time(https_cfg):
+    pn.save(https_cfg, pn.DuckDNS(TOKEN, "fulano-casa"))
+    acme, duck = FakeAcme(), FakeDuckDNS()
+    with pn.acme_lock(https_cfg) as got:  # `acervo duckdns` in a terminal
+        assert got
+        report = pn.upkeep(https_cfg, now=NOW, run=acme, opener=duck, detect=addrs())
+        assert report.get("busy") and acme.calls == [] and duck.calls == []
+    pn.upkeep(https_cfg, now=NOW, run=acme, opener=duck, detect=addrs())
+    assert acme.calls
+
+
+def test_mobile_data_never_moves_the_home_name(https_cfg):
+    pn.save(https_cfg, pn.DuckDNS(TOKEN, "fulano-casa", "fulano"))
+    pn.record_dns(https_cfg, "fulano-casa.duckdns.org", "192.168.1.104", NOW)
+    pn.record_dns(https_cfg, "fulano.duckdns.org", "100.71.3.9", NOW)
+    duck = FakeDuckDNS()
+    # Wi-Fi off: the operator's 10.x passes for "LAN"; Tailscale off: its CGNAT
+    # 100.x passes for Tailscale, but it's the same address used for the internet.
+    pn.upkeep(https_cfg, now=NOW + dt.timedelta(days=2), run=FakeAcme(), opener=duck,
+              detect=addrs(lan="10.147.20.3", tailscale="100.92.1.1", internet="100.92.1.1"))
+    assert duck.calls == []
+    # Back on the Wi-Fi with a new lease in the same network: followed.
+    pn.upkeep(https_cfg, now=NOW + dt.timedelta(days=2, minutes=10), run=FakeAcme(), opener=duck,
+              detect=addrs(lan="192.168.1.120", tailscale="100.71.3.9"))
+    assert sorted(duck.calls) == [("fulano", "100.71.3.9", TOKEN), ("fulano-casa", "192.168.1.120", TOKEN)]
+
+
+@pytest.mark.parametrize("old, new, same", [
+    ("192.168.1.104", "192.168.0.7", True), ("172.16.0.5", "172.20.1.1", True),
+    ("10.0.0.5", "10.0.3.9", True), ("10.0.0.5", "10.147.20.3", False),
+    ("192.168.1.104", "10.0.0.2", False), ("192.168.1.104", "100.92.1.1", False),
+])
+def test_same_network(old, new, same):
+    assert pn.same_network(old, new) is same
 
 
 def test_already_issued_certificate_is_reinstalled(https_cfg):
@@ -287,4 +378,5 @@ def test_health_reports_ready_addresses(https_cfg):
         body = client.get("/api/health").json()
     assert body["service"] == "acervo"
     assert body["addresses"] == {"home": "https://fulano-casa.duckdns.org:8765", "away": None}
+    assert body["remote"] is False  # TestClient is not on Tailscale
     assert TOKEN not in str(body)

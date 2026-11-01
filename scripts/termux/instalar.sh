@@ -89,7 +89,9 @@ if ask "Usar o cartão microSD para guardar tudo o que passar pela triagem (reco
     mkdir -p "$SD_DIR" && ok "cartão: $SD_DIR"
     warn "O cartão precisa estar como ARMAZENAMENTO PORTÁTIL (exFAT), nunca formatado como memória interna."
   else
-    warn "Cartão não encontrado (~/storage/external-1). Coloque o cartão e rode o instalador de novo."
+    warn "Cartão não encontrado (~/storage/external-1). Depois de colocar o cartão: rode"
+    warn "mkdir -p ~/storage/external-1/acervo, acrescente ao $CONF a linha"
+    warn "sd_dir = \"$HOME/storage/external-1/acervo\"  e rode:  acervo-ctl restart"
   fi
 fi
   read -r -p "  Seu e-mail (só vai junto dos avisos para o serviço da Apple; Enter para pular): " EMAIL

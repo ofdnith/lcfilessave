@@ -257,7 +257,8 @@ Fluxo da transferência:
   campos de Entrada e cartão de `/api/stats`, e `thermal` = `{temperature, max_temp_c, paused}`.
   `service` = `"acervo"` (é como o app do computador reconhece um Acervo ao procurar na rede) e
   `addresses` = `{home, away}`: os endereços seguros (DuckDNS + Let's Encrypt) que já têm
-  certificado, ou `null`.
+  certificado, ou `null`; `remote` = `true` quando o pedido chegou pelo Tailscale (a interface
+  sugere o endereço de fora em vez do de casa).
 - `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version, battery,
   inbox_max_gb, sd_for_library, thermal}`.
 - `GET /ca.crt` — certificado para instalar no iPhone/Mac quando se usa o HTTPS próprio (sem endereço seguro).

@@ -112,7 +112,7 @@
 
   <!-- Servers found on the network: the owner confirms which one -->
   <section id="found" class="hidden">
-    <p>Encontrei na sua rede:</p>
+    <p id="found-intro">Encontrei na sua rede:</p>
     <div id="found-list"></div>
     <div class="row">
       <button id="found-search" type="button">Procurar de novo</button>
@@ -188,18 +188,23 @@
     let chosen = url;
     const alts = [check.home, check.away].filter(Boolean);
     // Reached by IP, but the server has a trusted address that works: switch to it.
-    if (check.home && check.home !== url) {
+    // (Not when the away address answered: away from home the home one only times out.)
+    if (check.home && check.home !== url && check.away !== url) {
       try { await invoke("test_server", { url: check.home }); chosen = check.home; } catch (_) { /* keep url */ }
     }
     const origin = await invoke("set_server_url", { url: chosen, altUrls: alts });
     openServer(origin);
   }
 
+  /** True once this Mac has used a server: discovery then only offers that one. */
+  let configured = false;
+
   /** Tries the saved address and the server's other ones, then searches the network. */
   async function autoConnect() {
     let known = { server_url: null, alt_urls: [] };
     try { known = await invoke("get_known_servers"); } catch (err) { setStatus(String(err), "err"); }
     const candidates = [known.server_url, ...(known.alt_urls || [])].filter(Boolean);
+    configured = candidates.length > 0;
     let lastErr = null;
     for (const url of [...new Set(candidates)]) {
       show("connecting");
@@ -232,8 +237,22 @@
     if (!found.length) {
       offline((previousErr ? previousErr + " " : "") +
         "Não achei nenhum Acervo nesta rede. O celular do Acervo está ligado e no mesmo Wi-Fi? " +
-        "Fora de casa, use o endereço do Tailscale.");
+        "Se o Mac perguntou sobre a rede local, permita (Ajustes do Sistema › Privacidade e " +
+        "Segurança › Rede Local) e procure de novo. Fora de casa, ligue o Tailscale.");
       return;
+    }
+    // Anyone on a hotel or office Wi-Fi can pretend to be an Acervo. Once this
+    // Mac has used one, only that same server (by its saved names) is offered.
+    if (configured) {
+      const mine = found.filter((f) => f.known);
+      if (!mine.length) {
+        offline("Achei um Acervo nesta rede (" + (found[0].home || found[0].url) + "), mas não é o " +
+          "que este computador usa. Por segurança, o app não troca de servidor sozinho. Se você " +
+          "mudou de servidor, use Digitar o endereço.");
+        return;
+      }
+      if (mine.length === 1) { pick(mine[0]); return; }
+      found = mine;
     }
     const list = $("found-list");
     list.textContent = "";
@@ -255,6 +274,8 @@
       row.append(text, btn);
       list.append(row);
     }
+    $("found-intro").textContent = configured ? "Encontrei na sua rede:" :
+      "Encontrei na sua rede. Confira se o nome é o que você criou no DuckDNS:";
     show("found");
   }
 
@@ -275,7 +296,7 @@
       }
     }
     busy(false);
-    setStatus(lastErr + (f.home ? "" : " No celular, rode  acervo-ctl duckdns  e abra o app de novo."), "err");
+    offline(lastErr + (f.home ? "" : " No celular, rode  acervo-ctl duckdns  e abra o app de novo."));
   }
 
   function offline(message) {

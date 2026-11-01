@@ -142,9 +142,9 @@ esvaziar a lixeira e mexer em HDs ficam só para a rede de casa. Assim, um celul
 perdido e desbloqueado não consegue apagar nada. Para liberar tudo também fora de
 casa, use `remote_mode = "completo"` no `acervo.toml`.
 
-Use sempre o endereço com o **nome fixo** do Tailscale
-(`https://acervo.<sua-rede>.ts.net:8765`, veja `docs/migrar.md`, passo 0). Assim,
-se um dia o servidor mudar do Realme para um mini PC, nada muda no iPhone.
+Use sempre os endereços seguros (o de casa e o de fora), nunca o IP. Se um dia o
+servidor mudar do Realme para um mini PC, os nomes vão junto (`docs/migrar.md`) e
+nada muda no iPhone.
 
 ## 9. Limites do iPhone (testado em cada instalação)
 

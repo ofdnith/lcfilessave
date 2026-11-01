@@ -250,6 +250,8 @@ export interface Health {
   migration?: { active: boolean; started_at: string | null };
   /** Trusted addresses (DuckDNS + Let's Encrypt) that already have a certificate. */
   addresses?: { home: string | null; away: string | null };
+  /** The request came through Tailscale (away from home). */
+  remote?: boolean;
 }
 
 export interface AuthStatus {

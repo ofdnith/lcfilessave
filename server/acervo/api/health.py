@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import __version__, db, library, media, publicname
+from .. import __version__, auth, db, library, media, publicname
 from ..config import Config
 from ..storage import disk_usage, missing_or_unwritable
 
@@ -104,5 +104,7 @@ def health(request: Request) -> JSONResponse:
         "problems": problems,
         # Trusted addresses (DuckDNS + Let's Encrypt) that already have a certificate.
         "addresses": publicname.addresses(cfg),
+        # Through Tailscale? Tells the web app which trusted address to suggest.
+        "remote": auth.is_remote(request),
     }
     return JSONResponse(body, status_code=200 if ok else 503)

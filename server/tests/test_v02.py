@@ -277,6 +277,10 @@ def test_migration_to_a_new_server(tmp_path):
         shortcut_token = o.post("/api/tokens", json={"label": "iPhone"}).json()["token"]
         from acervo.certs import generate
         generate(old_cfg.subdir("certificados"), ["192.168.0.50"])
+        from acervo import publicname
+        publicname.save(old_cfg, publicname.DuckDNS("a" * 8 + "-1111-2222-3333-" + "b" * 12, "fulano-casa"))
+        (old_cfg.subdir("certificados") / "publico").mkdir(exist_ok=True)
+        (old_cfg.subdir("certificados") / "publico" / "fulano-casa.duckdns.org.key").write_text("chave")
 
         source = migrate.Source("http://old", migration_token(old_cfg), client=old)
         report = migrate.run(new_cfg, source, progress=lambda m: None)
@@ -304,6 +308,10 @@ def test_migration_to_a_new_server(tmp_path):
         # the same certificate authority came along (iPhone keeps trusting it)
         assert (new_cfg.subdir("certificados") / "ca.crt").read_bytes() == \
             (old_cfg.subdir("certificados") / "ca.crt").read_bytes()
+        # keys and the DuckDNS token stay private to the owner on the new machine
+        certs = new_cfg.subdir("certificados")
+        for secret in ("ca.key", "duckdns.json", "publico/fulano-casa.duckdns.org.key"):
+            assert (certs / secret).stat().st_mode & 0o077 == 0, secret
         assert (new_cfg.data_dir / "MIGRACAO.txt").read_text().count("Problemas: 0") == 1
         # and the new one is NOT frozen
         assert n.post("/api/items/actions", json={"ids": [ids[2]], "action": "keep"}).status_code == 200

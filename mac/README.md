@@ -115,8 +115,14 @@ O app acha o Acervo sozinho:
 1. Ao abrir, ele tenta o endereço de casa e, se não responder, o do Tailscale.
 2. Se nenhum responder (ou na primeira vez), ele **procura o Acervo na rede**:
    pergunta a cada endereço da sua rede local, leva poucos segundos.
-3. Na primeira vez, mostra o que encontrou: clique em **Usar este**. A interface
-   do Acervo aparece; faça login com a senha do servidor.
+3. Na primeira vez, mostra o que encontrou: confira se o nome é o que você criou no
+   DuckDNS e clique em **Usar este**. A interface do Acervo aparece; faça login com a
+   senha do servidor.
+
+Depois disso, a procura só aceita **esse mesmo servidor**, reconhecido pelos
+endereços seguros que o app guardou. Numa rede de hotel ou de escritório, outro
+aparelho que finja ser um Acervo é ignorado. Para trocar de servidor de propósito,
+use **Acervo › Trocar servidor…**.
 
 Para os endereços com certificado de verdade, configure uma vez o **endereço
 seguro** no celular (`acervo-ctl duckdns`, veja `docs/iphone.md`). O app aprende os
@@ -156,6 +162,8 @@ cd mac/src-tauri && ACERVO_TEST_SERVER=http://127.0.0.1:8765 cargo test -- --ign
   digitado e tela de "servidor fora do ar". A procura aceita qualquer certificado
   só para ler o `/api/health` público (nunca manda o token); o endereço seguro que
   ele informa é conferido com verificação normal e tem de apontar para a mesma máquina.
+  Depois da primeira vez, só vale um servidor cujos nomes seguros já estão salvos
+  (`mark_known`); um IP salvo sozinho não basta (outra rede pode ter o mesmo IP).
 - Permissões: o Tauri bloqueia comandos vindos de páginas remotas. Como o
   endereço do servidor é escolhido pelo usuário, o app cria em tempo de execução
   uma permissão (capability) só para **exatamente aquele endereço**

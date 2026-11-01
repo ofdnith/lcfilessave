@@ -27,12 +27,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Iterator
 
 from . import db
 from .catalog import now_iso
-from .config import Config
+from .config import CERTS_DIR, Config
 from .storage import TEMP_SUFFIX, ensure_layout, fsync_dir
 
 STATE_FILE = ".migracao.json"
@@ -144,8 +144,14 @@ def _download(source: Source, entry: dict, dest: Path, report: Report) -> None:
                 return
             dest.parent.mkdir(parents=True, exist_ok=True)
             part = dest.with_name(dest.name + TEMP_SUFFIX)
+            # Everything under certificados/ is private: keys, the DuckDNS token.
+            secret = entry["kind"] == "aux" and PurePosixPath(entry["path"]).parts[:1] == (CERTS_DIR,)
+            if secret:
+                os.chmod(dest.parent, 0o700)
             h = hashlib.sha256()
             with open(part, "wb") as fh:
+                if secret:
+                    os.fchmod(fh.fileno(), 0o600)
                 for block in chunks:
                     fh.write(block)
                     h.update(block)
@@ -156,8 +162,6 @@ def _download(source: Source, entry: dict, dest: Path, report: Report) -> None:
                 raise MigrationError("hash não confere")
             os.replace(part, dest)
             fsync_dir(dest.parent)
-            if entry["kind"] == "aux" and dest.parent.name == "certificados" and dest.suffix in (".key", ".pem"):
-                os.chmod(dest, 0o600)
             report.bytes += entry["size"]
             if entry["kind"] == "original":
                 report.originals += 1

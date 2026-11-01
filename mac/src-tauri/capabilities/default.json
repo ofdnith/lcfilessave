@@ -1,13 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "local-page",
-  "description": "Bundled setup page (src/index.html): only reads/saves/tests the server address. The remote server origin gets its own capability at runtime (see grant_remote in src/lib.rs).",
+  "description": "Bundled setup page (src/index.html): reads/saves/tests the server address and searches the local network for it. The remote server origin gets its own capability at runtime (see grant_remote in src/lib.rs).",
   "local": true,
   "windows": ["main"],
   "permissions": [
     "core:default",
     "allow-get-server-url",
+    "allow-get-known-servers",
     "allow-set-server-url",
-    "allow-test-server"
+    "allow-test-server",
+    "allow-discover-server"
   ]
 }

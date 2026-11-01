@@ -196,16 +196,12 @@ fn set_server_url(
 ) -> Result<String, String> {
     let origin = config::normalize_server_url(&url)?;
     let path = state.shared.lock().unwrap().config_path.clone();
-    let mut alts: Vec<String> = match alt_urls {
-        Some(list) => list
-            .iter()
-            .filter_map(|u| config::normalize_server_url(u).ok())
-            .collect(),
-        // Same server, another of its addresses: keep what we knew.
-        None => state.shared.lock().unwrap().alt_urls.clone(),
+    let alts = {
+        let sh = state.shared.lock().unwrap();
+        let mut known: Vec<String> = sh.server_url.iter().cloned().collect();
+        known.extend(sh.alt_urls.iter().cloned());
+        merge_alts(&origin, alt_urls, &known)
     };
-    alts.retain(|u| *u != origin);
-    alts.dedup();
     config::save(
         &path,
         &config::AppConfig {
@@ -222,10 +218,42 @@ fn set_server_url(
     Ok(origin)
 }
 
-/// Looks for an Acervo on the local network (see discover.rs).
+/// The other addresses to remember for `origin`.
+///
+/// The server reports its trusted addresses only while their certificates are
+/// valid; one brief gap (a certificate being renewed) must not wipe the ones
+/// saved earlier, or the next start away from home has nothing to try. So the
+/// same server's known addresses are kept, and only a different server
+/// (nothing in common with what was saved) starts a fresh list.
+fn merge_alts(origin: &str, reported: Option<Vec<String>>, known: &[String]) -> Vec<String> {
+    let reported: Vec<String> = match reported {
+        Some(list) => list
+            .iter()
+            .filter_map(|u| config::normalize_server_url(u).ok())
+            .collect(),
+        None => known.to_vec(),
+    };
+    let same_server = known.iter().any(|k| k == origin || reported.contains(k));
+    let mut alts = reported;
+    if same_server {
+        alts.extend(known.iter().cloned());
+    }
+    let mut seen = HashSet::new();
+    alts.retain(|u| u != origin && seen.insert(u.clone()));
+    alts
+}
+
+/// Looks for an Acervo on the local network (see discover.rs), marking the
+/// one this Mac already used.
 #[tauri::command]
-async fn discover_server() -> Result<Vec<discover::Found>, String> {
-    discover::sweep(discover::ACERVO_PORT).await
+async fn discover_server(state: tauri::State<'_, AppState>) -> Result<Vec<discover::Found>, String> {
+    let saved: Vec<String> = {
+        let sh = state.shared.lock().unwrap();
+        sh.server_url.iter().chain(sh.alt_urls.iter()).cloned().collect()
+    };
+    let mut found = discover::sweep(discover::ACERVO_PORT).await?;
+    discover::mark_known(&mut found, &saved);
+    Ok(found)
 }
 
 #[derive(Serialize)]
@@ -714,6 +742,63 @@ mod tests {
             alt_urls: Vec::new(),
             granted: HashSet::new(),
             local_url: Some(Url::parse("tauri://localhost/index.html").unwrap()),
+        }
+    }
+
+    #[test]
+    fn alternate_addresses_survive_a_gap_but_not_a_new_server() {
+        let home = "https://fulano-casa.duckdns.org:8765";
+        let away = "https://fulano.duckdns.org:8765";
+        let ip = "https://192.168.1.104:8765";
+        let known = vec![home.to_string(), away.to_string()];
+        // Certificate briefly not valid: the server reports nothing.
+        assert_eq!(merge_alts(home, Some(vec![]), &known), vec![away.to_string()]);
+        // Reached by IP, same server reporting its names.
+        assert_eq!(merge_alts(ip, Some(known.clone()), &known), vec![home.to_string(), away.to_string()]);
+        // A different server typed by hand: old addresses go.
+        assert!(merge_alts("https://outro.duckdns.org:8765", Some(vec![]), &known).is_empty());
+        // No list given: keep what we knew, minus the chosen one.
+        assert_eq!(merge_alts(away, None, &known), vec![home.to_string()]);
+    }
+
+    /// Commands the bundled page calls (`invoke("name"`), in file order.
+    fn page_commands() -> Vec<String> {
+        let page = include_str!("../../src/index.html");
+        page.split("invoke(\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Tauri rejects any app command that is not declared in build.rs and
+    /// allowed by a capability, even from the bundled page.
+    #[test]
+    fn every_command_the_page_calls_is_allowed() {
+        let build = include_str!("../build.rs");
+        let local: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let allowed: Vec<&str> = local["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p.as_str())
+            .collect();
+        let cmds = page_commands();
+        assert!(cmds.contains(&"discover_server".to_string()), "{cmds:?}");
+        for cmd in cmds {
+            assert!(build.contains(&format!("\"{cmd}\"")), "{cmd} falta em build.rs");
+            let perm = format!("allow-{}", cmd.replace('_', "-"));
+            assert!(allowed.contains(&perm.as_str()), "{perm} falta em capabilities/default.json");
+            // The setup page's own commands never go to the remote server origin,
+            // except reading the address (the web UI uses it).
+            if cmd != "get_server_url" {
+                assert!(!REMOTE_PERMISSIONS.contains(&perm.as_str()), "{perm} não deve ir para o servidor");
+            }
+        }
+        for perm in REMOTE_PERMISSIONS.iter().filter_map(|p| p.strip_prefix("allow-")) {
+            let cmd = perm.replace('-', "_");
+            assert!(build.contains(&format!("\"{cmd}\"")), "{cmd} falta em build.rs");
         }
     }
 

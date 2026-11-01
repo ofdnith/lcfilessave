@@ -77,6 +77,14 @@ do Mac recusam o servidor enquanto isso não for feito.
 roteadores bloqueiam nomes da internet que apontam para IPs da casa ("proteção
 contra DNS rebinding"); se o endereço de casa não abrir no Wi-Fi, é isso.
 
+**O que fica público:** os dois nomes e os IPs internos para onde apontam (o do
+Wi-Fi, 192.168…, e o do Tailscale, 100.…) aparecem no DNS de qualquer um, e os
+nomes entram nos registros públicos de certificados (Certificate Transparency).
+Isso não abre acesso a nada (esses IPs só funcionam dentro de casa e do seu
+Tailscale), mas escolha nomes que não digam quem você é, se isso importar. O token
+do DuckDNS fica só no servidor (`certificados/duckdns.json` e a pasta do acme.sh,
+ambos só para o dono); `acervo-ctl duckdns --remover` apaga os dois.
+
 ## 6. Atalhos do iPhone têm limites
 
 - O backup diário roda com tempo e memória limitados; vídeos grandes podem

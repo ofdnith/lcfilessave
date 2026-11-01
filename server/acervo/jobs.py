@@ -150,6 +150,14 @@ class Worker:
         while not self._stop.wait(timeout=delay):
             delay = 600
             try:
+                conn = db.connect(self.cfg.db_path)
+                try:
+                    # Frozen during a migration: the new server took over the names
+                    # and must not have this one pointing them back here.
+                    if get_setting(conn, "migration_active"):
+                        continue
+                finally:
+                    conn.close()
                 publicname.upkeep(self.cfg)
             except Exception:
                 log.exception("Erro ao cuidar do endereço seguro (DuckDNS)")

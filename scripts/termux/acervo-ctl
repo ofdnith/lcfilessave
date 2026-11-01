@@ -84,7 +84,11 @@ EOF
   atualizar)
     # Stop first: the update adjusts the catalog, and only a fresh start loads the new code.
     "$0" stop
-    cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/termux/instalar.sh"
+    if ! (cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/termux/instalar.sh"); then
+      echo "A atualização não terminou (veja a mensagem acima). Religando o Acervo." >&2
+    fi
+    # Never leave the backups stopped, whatever happened above.
+    running || "$0" start
     ;;
   *) sed -n '2,5p' "$0"; exit 2 ;;
 esac

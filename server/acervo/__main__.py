@@ -236,7 +236,11 @@ def _duckdns(cfg, args) -> int:
     from . import publicname as pn
 
     if args.remover:
-        print("Endereço seguro desligado." if pn.remove(cfg) else "O endereço seguro já estava desligado.")
+        with pn.acme_lock(cfg):
+            removed = pn.remove(cfg)
+            pn.forget_acme_token(cfg)
+        print("Endereço seguro desligado (o token foi apagado deste celular)." if removed
+              else "O endereço seguro já estava desligado.")
         return 0
     current = pn.load(cfg)
     found = pn.detect_addresses()
@@ -271,6 +275,18 @@ def _duckdns(cfg, args) -> int:
         return 1
 
     dd = pn.DuckDNS(token=token, home=home, away=away)
+    with pn.acme_lock(cfg, blocking=False) as free:
+        if free:
+            return _duckdns_setup(cfg, pn, dd, found)
+    print("O servidor está mexendo nos certificados agora; esperando ele terminar…")
+    with pn.acme_lock(cfg):
+        return _duckdns_setup(cfg, pn, dd, found)
+
+
+def _duckdns_setup(cfg, pn, dd, found) -> int:
+    """Publishes the names and gets the certificates, holding `acme_lock` so the
+    server's own upkeep never runs acme.sh for the same name at the same time."""
+    token, home, away = dd.token, dd.home, dd.away
     print(f"\nIP no Wi-Fi: {found['lan'] or '(não achei)'} · IP no Tailscale: {found['tailscale'] or '(desligado)'}")
     if not found["lan"]:
         print("Não achei o IP do Wi-Fi. Confira se o celular está conectado e tente de novo.", file=sys.stderr)
@@ -285,6 +301,11 @@ def _duckdns(cfg, args) -> int:
                 return 1
         else:
             print("O Tailscale está desligado neste celular; o nome de fora é atualizado quando ele ligar.")
+    pn.mark_attempt(cfg, [fqdn for _, fqdn in dd.names()])
+    names = dict(dd.names())
+    pn.record_dns(cfg, names["home"], found["lan"])
+    if away and found["tailscale"]:
+        pn.record_dns(cfg, names["away"], found["tailscale"])
     pn.save(cfg, dd)
     print("Nomes salvos e apontados para este celular.")
 
@@ -296,12 +317,11 @@ def _duckdns(cfg, args) -> int:
     ok = True
     for role, fqdn in dd.names():
         print(f"\nPedindo o certificado de {fqdn} ao Let's Encrypt (1 a 3 minutos)…")
-        pn.mark_attempt(cfg, fqdn)
         if pn.issue(cfg, dd, fqdn):
             print(f"Pronto: https://{fqdn}:{cfg.port}")
         else:
             ok = False
-            print(f"Não saiu agora (detalhes em {cfg.acme_home / 'acervo.log'}). "
+            print("Não saiu agora (o motivo aparece logo acima). "
                   "O servidor tenta de novo sozinho em algumas horas.", file=sys.stderr)
     if ok:
         print("\nTudo certo. Use estes endereços no iPhone e no Mac; o app do Mac acha sozinho.")

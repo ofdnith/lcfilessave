@@ -57,8 +57,12 @@
     try {
       const h = await api.health();
       app.migration = !!h.migration?.active;
-      const target = app.readonly ? h.addresses?.away : h.addresses?.home;
-      safeUrl = target && new URL(target).host !== location.host ? target + '/' + location.hash : null;
+      const trusted = [h.addresses?.home, h.addresses?.away].filter((u): u is string => !!u);
+      const onTrusted = trusted.some((u) => new URL(u).host === location.host);
+      // The Mac app picks the address itself (and only navigates to that one).
+      const inApp = '__TAURI__' in window;
+      const target = h.remote ? h.addresses?.away : h.addresses?.home;
+      safeUrl = target && !onTrusted && !inApp ? target + '/' + location.hash : null;
     } catch {
       /* the offline screen covers a dead server */
     }
