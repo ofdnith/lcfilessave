@@ -9,8 +9,10 @@ on `cryptography` (Termux: pkg install python-cryptography):
 Topics a device can subscribe to:
   backup_atrasado   daily backup older than 48 h
   espaco            server above the storage alert
-  hd_problema       a drive health check found a problem
+  lote              a batch is waiting to go to an external storage
+  hd_problema       an external storage health check found a problem (old id, kept)
   backup_concluido  summary at the end of each daily backup
+  entrada           the Entrada is waiting for triage
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from .config import CERTS_DIR, Config
 
 log = logging.getLogger(__name__)
 
-TOPICS = ("backup_atrasado", "espaco", "hd_problema", "backup_concluido", "entrada", "cartao")
+TOPICS = ("backup_atrasado", "espaco", "lote", "hd_problema", "backup_concluido", "entrada")
 MAX_FAILURES = 10
 
 

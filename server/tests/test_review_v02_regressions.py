@@ -230,8 +230,8 @@ def test_m11_daily_summary_is_per_run(api, tmp_path):
     assert api.post("/api/daily/finish").json()["summary_text"] == "Backup diário: 1 foto, 0 vídeos"
 
 
-def test_low_safe_mode_ipv4_mapped(cfg):
+def test_remote_detected_through_ipv4_mapped(cfg):
     with TestClient(create_app(cfg), client=("::ffff:100.101.102.103", 5000)) as client:
         a = Api(client, cfg, login(client, cfg))
         assert a.get("/api/auth/status").json()["remote"] is True
-        assert a.post("/api/trash/purge-expired").status_code == 403
+        assert a.post("/api/trash/purge-expired").status_code == 200  # same as at home

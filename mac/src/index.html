@@ -89,6 +89,11 @@
   .found strong { display: block; word-break: break-all; }
   .found small { color: var(--muted); }
   .linklike { border: none; padding: 0; color: var(--accent); font-weight: 500; background: none; }
+  details.help { margin-top: 22px; font-size: 13px; color: var(--muted, #9fadbb); }
+  details.help summary { cursor: pointer; color: var(--info, #8fb9ff); font-weight: 560; }
+  details.help ol { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+  details.help strong { color: var(--text, #e9eef3); }
+  details.help code { font-size: 12px; padding: 1px 4px; border-radius: 4px; background: rgba(255,255,255,0.08); }
 </style>
 </head>
 <body>
@@ -146,6 +151,27 @@
   </form>
 
   <div id="status" role="status" aria-live="polite"></div>
+
+  <!-- Offline tutorial: the full help lives in the Acervo itself (Ajuda), which
+       needs the server; this covers getting there. -->
+  <details class="help">
+    <summary>Não conecta? Passo a passo</summary>
+    <ol>
+      <li><strong>O celular do Acervo está ligado e na tomada?</strong> Abra o Termux nele e rode
+        <code>acervo-ctl status</code>. Se disser “parado”, rode <code>acervo-ctl start</code>.</li>
+      <li><strong>Em casa:</strong> este computador e o celular precisam estar no mesmo Wi-Fi.
+        Toque em <em>Procurar na rede</em>: o app acha o Acervo sozinho.</li>
+      <li><strong>Fora de casa:</strong> ligue o Tailscale neste computador e no celular do Acervo
+        (mesma conta). Fora de casa tudo funciona igual a dentro de casa, sempre com a senha.</li>
+      <li><strong>Endereço seguro:</strong> no celular, rode <code>acervo-ctl duckdns --mostrar</code>
+        e cole aqui o endereço que começa com <code>https://</code>. Ele funciona em qualquer navegador,
+        sem instalar certificado.</li>
+      <li><strong>Ainda nada?</strong> Rode <code>acervo-ctl restart</code> no celular, espere um minuto
+        e toque em <em>Tentar de novo</em>.</li>
+    </ol>
+    <p>Depois de conectar, todos os tutoriais (transferir lotes para um armazenamento, verificar a saúde,
+      esvaziar o iPhone…) ficam em <strong>Ajuda</strong>, na barra lateral do Acervo.</p>
+  </details>
 </main>
 
 <script>

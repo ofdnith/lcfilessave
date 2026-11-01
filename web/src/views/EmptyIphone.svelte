@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpLink from '../components/HelpLink.svelte';
   import Icon from '../components/Icon.svelte';
   import { num, plural } from '../lib/format';
   import { emptyIphone as e } from '../lib/empty-iphone.svelte';
@@ -25,7 +26,7 @@
 <div class="page empty-iphone">
   <a class="back" href={href('dispositivos')}><Icon name="left" size={16} /> Dispositivos</a>
   <h1 class="page-title">Esvaziar iPhone</h1>
-  <p class="page-sub">Envia tudo do iPhone e confere, arquivo por arquivo, antes de você apagar qualquer coisa.</p>
+  <p class="page-sub">Envia tudo do iPhone e confere, arquivo por arquivo, antes de você apagar qualquer coisa. <HelpLink slug="esvaziar-iphone" label="Tutorial completo" /></p>
 
   {#if e.phase === 'idle'}
     <ol class="steps panel">
@@ -112,7 +113,7 @@
     color: var(--muted);
     text-decoration: none;
     font-size: 14px;
-    margin: var(--sat) 0 8px;
+    margin: var(--page-top, var(--sat)) 0 8px;
   }
   .steps {
     margin: 0 0 18px;

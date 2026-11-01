@@ -76,7 +76,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding-top: var(--sat);
+    padding-top: var(--page-top, var(--sat));
   }
   .new {
     display: flex;

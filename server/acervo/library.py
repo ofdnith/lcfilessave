@@ -14,7 +14,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db, sdcard
+from . import db
 from .catalog import (free_rel_path, get_setting, inbox_bytes, iso_in, library_bytes_by_root, library_dir, log_event,
                       now_iso, parse_iso, preview_path, transaction)
 from .config import INBOX_DIR, TRASH_DIR, Config
@@ -27,31 +27,27 @@ class ActionError(ValueError):
     """Message in Portuguese, shown to the user."""
 
 
-SD_MARGIN_BYTES = 1_000_000_000
-SD_BATCH_BYTES = 2_000_000_000  # per migrate_to_sd() call, so the loop stays responsive
+# The microSD card was retired on 01/11/2026: everything new stays on the phone's
+# own storage until it goes to an external storage. Files copied to the card
+# before that are brought back (verified) by bring_back_from_card().
+CARD_MARGIN_BYTES = 1_000_000_000
+CARD_BATCH_BYTES = 2_000_000_000  # per bring_back_from_card() call, so the loop stays responsive
 
 
-def sd_available(cfg: Config) -> bool:
+def card_available(cfg: Config) -> bool:
     return cfg.sd_dir is not None and cfg.sd_dir.is_dir()
 
 
-def sd_has_room(cfg: Config, size: int) -> bool:
-    return sd_available(cfg) and disk_usage(cfg.sd_dir).free_bytes > size * 2 + SD_MARGIN_BYTES
+def internal_has_room(cfg: Config, size: int) -> bool:
+    """Room on the phone's own storage for `size` bytes more, without crossing the alert level."""
+    usage = disk_usage(cfg.data_dir)
+    after = 100 * (usage.used_bytes + size) / usage.total_bytes if usage.total_bytes else 100
+    return usage.free_bytes > size * 2 + CARD_MARGIN_BYTES and after < cfg.storage_alert_pct
 
 
 def choose_root(cfg: Config, size: int) -> str:
-    """Where a kept item goes at triage time.
-
-    sd_for_library: internal storage, instantly; migrate_to_sd() then copies it to
-    the microSD in the background (copying in the request would make triage
-    wait on the card). Otherwise: internal storage, and the card only once
-    internal storage passes the alert level.
-    """
-    if cfg.sd_for_library or not sd_available(cfg):
-        return "main"
-    if disk_usage(cfg.data_dir).used_pct < cfg.storage_alert_pct:
-        return "main"
-    return "sd" if sd_has_room(cfg, size) else "main"
+    """Where a kept item goes at triage time: always the server's own storage."""
+    return "main"
 
 
 def _files(conn: sqlite3.Connection, item_id: int) -> list[sqlite3.Row]:
@@ -113,7 +109,7 @@ def discard(cfg: Config, conn: sqlite3.Connection, item_id: int, actor: str = "w
     if item["state"] == "trash":
         return
     if item["state"] not in ("inbox", "library"):
-        raise ActionError("Itens que estão no HD não podem ir para a lixeira.")
+        raise ActionError("Itens que já estão num armazenamento não podem ir para a lixeira.")
     root = _files(conn, item_id)[0]["root"]
     with transaction(conn):
         conn.execute(
@@ -198,14 +194,16 @@ def _copy_then_switch(cfg: Config, conn: sqlite3.Connection, item_id: int, root:
     return True
 
 
-def migrate_to_sd(cfg: Config, actor: str = "server", max_bytes: int = SD_BATCH_BYTES) -> int:
-    """Copy kept items still on internal storage to the microSD (sd_for_library),
-    verified by SHA-256, then free the internal copy. Returns how many moved.
+def bring_back_from_card(cfg: Config, actor: str = "server", max_bytes: int = CARD_BATCH_BYTES) -> int:
+    """Copy kept items that still live on the retired microSD back to the phone's
+    own storage, verified by SHA-256, then free the card copy. Returns how many moved.
 
-    Called in a loop by the worker; `max_bytes` bounds one call so the loop
-    stays responsive. Stops at the first card error (removed, full, failing).
+    Called in a loop by the worker; `max_bytes` bounds one call. Stops when the
+    phone has no room left (those items leave in the next batch to an external
+    storage instead, which reads them straight from the card) or at the first
+    card error (removed, failing).
     """
-    if not cfg.sd_for_library or not sd_available(cfg):
+    if not card_available(cfg):
         return 0
     conn = db.connect(cfg.db_path)
     moved = done_bytes = 0
@@ -214,33 +212,33 @@ def migrate_to_sd(cfg: Config, actor: str = "server", max_bytes: int = SD_BATCH_
             return 0
         rows = conn.execute(
             "SELECT i.id, sum(f.size_bytes) AS size FROM items i JOIN files f ON f.item_id = i.id "
-            "WHERE i.state = 'library' AND f.root = 'main' AND f.rel_path IS NOT NULL "
+            "WHERE i.state = 'library' AND f.root = 'sd' AND f.rel_path IS NOT NULL "
             "GROUP BY i.id ORDER BY i.id").fetchall()
         for row in rows:
             if done_bytes and done_bytes + row["size"] > max_bytes:
                 break
-            if not sd_has_room(cfg, row["size"]):
-                log.info("Cartão microSD cheio: itens do Acervo continuam na memória interna "
-                         "até um lote ir para o HD")
+            if not internal_has_room(cfg, row["size"]):
+                log.info("Sem espaço no celular para trazer o resto do cartão: esses itens saem "
+                         "do cartão direto no próximo lote para o armazenamento")
                 break
             try:
-                if _copy_then_switch(cfg, conn, row["id"], "sd", "to-sd", actor):
+                if _copy_then_switch(cfg, conn, row["id"], "main", "from-sd", actor):
                     moved += 1
                     done_bytes += row["size"]
             except _Changed:
                 continue
             except (ActionError, OSError, VerificationError) as exc:
-                log.warning("Não consegui copiar o item %s para o cartão: %s", row["id"], exc)
+                log.warning("Não consegui trazer o item %s do cartão: %s", row["id"], exc)
                 break
     finally:
         conn.close()
     if moved:
-        log.info("Cartão microSD: %d itens do Acervo copiados e conferidos", moved)
+        log.info("Cartão microSD: %d itens trazidos de volta e conferidos", moved)
     return moved
 
 
 def storage_summary(cfg: Config, conn: sqlite3.Connection) -> dict:
-    """Entrada limit and microSD state, for /api/stats and /api/health."""
+    """Entrada limit and reminders, for /api/stats and /api/health."""
     inbox = inbox_bytes(conn)
     limit = cfg.inbox_max_gb * 1_000_000_000
     oldest = conn.execute("SELECT min(uploaded_at) FROM items WHERE state = 'inbox'").fetchone()[0]
@@ -259,25 +257,86 @@ def storage_summary(cfg: Config, conn: sqlite3.Connection) -> dict:
         "inbox_oldest_at": oldest,
         "inbox_waiting_days": days,
         "inbox_reminder": {"reasons": reasons, "days": days, "bytes": inbox} if reasons else None,
-        "sd": None,
+        # Retired microSD: what is still there (it comes back by itself, see bring_back_from_card).
+        "card": None,
     }
-    if cfg.sd_dir is not None:
-        present = sd_available(cfg)
-        usage = disk_usage(cfg.sd_dir) if present else None
-        pending = pending_sd_bytes(conn) if cfg.sd_for_library else 0
-        data["sd"] = {
-            "present": present,
-            "for_library": cfg.sd_for_library,
-            "total_bytes": usage.total_bytes if usage else None,
-            "free_bytes": usage.free_bytes if usage else None,
-            "used_pct": usage.used_pct if usage else None,
-            "library_bytes": library_bytes_by_root(conn)["sd"],
-            "pending_bytes": pending,
-            # Full enough that the next HD batch should come from the card.
-            "alert": (not present) or (usage is not None and usage.used_pct >= cfg.storage_alert_pct),
-            "health": sdcard.health(cfg, conn),
-        }
+    card_bytes = library_bytes_by_root(conn).get("sd", 0)
+    if card_bytes or (cfg.sd_dir is not None and card_available(cfg)):
+        data["card"] = {"present": card_available(cfg), "library_bytes": card_bytes}
     return data
+
+
+def _gb(n: int) -> str:
+    return f"{n / 1e9:.{0 if n >= 10e9 else 1}f}".replace(".", ",")
+
+
+def _days(n: int) -> str:
+    return f"{n} dia{'s' if n != 1 else ''}"
+
+
+def pending_archive(cfg: Config, conn: sqlite3.Connection) -> dict:
+    """Kept items (Acervo) whose original is still on the server: the next batch."""
+    size, oldest = conn.execute(
+        "SELECT coalesce(sum(f.size_bytes), 0), min(i.uploaded_at) FROM files f JOIN items i ON i.id = f.item_id "
+        "WHERE i.state = 'library' AND f.rel_path IS NOT NULL").fetchone()
+    days = int((datetime.now(timezone.utc) - parse_iso(oldest)).total_seconds() // 86400) if oldest else None
+    return {"bytes": size, "oldest_days": days}
+
+
+def alerts(cfg: Config, conn: sqlite3.Connection, daily_overdue: bool = False) -> list[dict]:
+    """Everything the owner should act on, most urgent first. The same texts go to
+    the app (banners) and to the iPhone notifications (`topic`).
+
+    Since the microSD was retired, the phone's own storage holds the Entrada and
+    the Acervo until a batch goes to an external storage; until then, those
+    files exist only on the phone. The alerts follow that: space on the phone,
+    a batch waiting for an external storage, the Entrada waiting for triage,
+    the daily backup."""
+    out: list[dict] = []
+    summary = storage_summary(cfg, conn)
+    usage = disk_usage(cfg.data_dir)
+    batch = pending_archive(cfg, conn)
+    budget = cfg.archive_batch_gb * 1_000_000_000
+    if usage.used_pct >= cfg.storage_alert_pct:
+        critical = usage.used_pct >= 95 or usage.free_bytes < 3_000_000_000
+        out.append({
+            "id": "espaco", "topic": "espaco", "level": "danger" if critical else "warn",
+            "title": "Pouco espaço no celular do Acervo",
+            "text": f"{usage.used_pct:.0f}% ocupado, {_gb(usage.free_bytes)} GB livres."
+                    + (" Novos envios vão parar quando acabar." if critical else "")
+                    + (" Transfira um lote para um armazenamento" if batch["bytes"] else " Faça a triagem da Entrada")
+                    + " para liberar espaço.",
+            "href": "/#/dispositivos" if batch["bytes"] else "/#/entrada",
+        })
+    by_size = batch["bytes"] >= budget
+    by_age = bool(cfg.archive_alert_days and batch["bytes"] and batch["oldest_days"] is not None
+                  and batch["oldest_days"] >= cfg.archive_alert_days)
+    if by_size or by_age:
+        why = (f"{_gb(batch['bytes'])} GB do Acervo"
+               + (f", o mais antigo há {_days(batch['oldest_days'])}," if by_age else "")
+               + " só existem no celular.")
+        out.append({
+            "id": "lote", "topic": "lote", "level": "warn",
+            "title": "Lote pronto para o armazenamento",
+            "text": why + " Conecte um armazenamento no computador e use Transferir lote, no app do Acervo.",
+            "href": "/#/dispositivos",
+        })
+    reminder = summary["inbox_reminder"]
+    if reminder:
+        out.append({"id": "entrada", "topic": "entrada", "level": "info", "title": "Entrada esperando triagem",
+                    "text": inbox_reminder_text(reminder), "href": "/#/entrada"})
+    if daily_overdue:
+        out.append({"id": "backup_atrasado", "topic": "backup_atrasado", "level": "warn",
+                    "title": "Backup diário atrasado",
+                    "text": "O iPhone não manda fotos há mais de 48 horas. Confira a automação do Atalhos.",
+                    "href": "/#/ajuda/backup-diario"})
+    card = summary["card"]
+    if card and card["library_bytes"] and not card["present"]:
+        out.append({"id": "cartao", "topic": None, "level": "danger", "title": "Cartão microSD não encontrado",
+                    "text": f"{_gb(card['library_bytes'])} GB do Acervo ainda estão no cartão antigo. Coloque o cartão "
+                            "de volta até eles voltarem para o celular (acontece sozinho).",
+                    "href": "/#/ajuda/cartao"})
+    return out
 
 
 def inbox_reminder_text(reminder: dict) -> str:
@@ -287,13 +346,6 @@ def inbox_reminder_text(reminder: dict) -> str:
     if days:
         parts.append(f"a mais antiga chegou há {days} dia{'s' if days != 1 else ''}")
     return " · ".join(parts) + ". Até a triagem, isso só existe no celular."
-
-
-def pending_sd_bytes(conn: sqlite3.Connection) -> int:
-    """Kept items that still exist only on internal storage."""
-    return conn.execute(
-        "SELECT coalesce(sum(f.size_bytes), 0) FROM files f JOIN items i ON i.id = f.item_id "
-        "WHERE i.state = 'library' AND f.root = 'main' AND f.rel_path IS NOT NULL").fetchone()[0]
 
 
 def set_important(conn: sqlite3.Connection, item_id: int, value: bool) -> None:

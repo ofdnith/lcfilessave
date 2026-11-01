@@ -217,34 +217,25 @@ def test_vapid_header_is_a_valid_es256_jwt(api):
                f"{head}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))
 
 
-# --- 6. safe mode away from home -------------------------------------------------------------------
+# --- 6. away from home works like at home (safe mode retired 01/11/2026) ------------------------
 
-def test_safe_mode_through_tailscale(cfg, tmp_path):
+def test_everything_works_through_tailscale(cfg, tmp_path):
     with TestClient(create_app(cfg), client=("100.101.102.103", 5000)) as client:
         token = login(client, cfg)
         a = Api(client, cfg, token)
         st = a.get("/api/auth/status").json()
-        assert st["remote"] is True and st["readonly"] is True
-        iid = a.upload(make_jpeg(tmp_path / "IMG_S.JPG"))["item_id"]  # sending is fine
+        assert st["remote"] is True and "readonly" not in st
+        iid = a.upload(make_jpeg(tmp_path / "IMG_S.JPG"))["item_id"]
         assert a.post("/api/items/actions", json={"ids": [iid], "action": "keep"}).status_code == 200
-        res = a.post("/api/items/actions", json={"ids": [iid], "action": "discard"})
-        assert res.status_code == 403 and "modo seguro" in res.json()["detail"]
-        assert a.post("/api/trash/purge-expired").status_code == 403
-        assert a.post("/api/volumes", json={"capacity_bytes": 10**12}).status_code == 403
-        assert a.post("/api/tokens", json={"label": "x"}).status_code == 403
-        assert a.post("/api/migration/start").status_code == 403
-        assert a.get(f"/api/items/{iid}").status_code == 200  # viewing is fine
-    with TestClient(create_app(cfg), client=("192.168.0.20", 5000)) as client:  # at home
-        a = Api(client, cfg, token)
-        assert a.get("/api/auth/status").json()["readonly"] is False
         assert a.post("/api/items/actions", json={"ids": [iid], "action": "discard"}).status_code == 200
+        assert a.post("/api/trash/purge-expired").status_code == 200
+        assert a.post("/api/volumes", json={"capacity_bytes": 10**12}).status_code == 200
+        assert a.post("/api/tokens", json={"label": "x"}).status_code == 200
 
 
-def test_full_mode_allows_everything_remotely(cfg, tmp_path):
-    cfg2 = replace(cfg, remote_mode="completo")
-    with TestClient(create_app(cfg2), client=("100.101.102.103", 5000)) as client:
-        a = Api(client, cfg2, login(client, cfg2))
-        assert a.get("/api/auth/status").json()["readonly"] is False
+def test_away_from_home_still_needs_the_password(cfg):
+    with TestClient(create_app(cfg), client=("100.101.102.103", 5000)) as client:
+        assert client.get("/api/stats").status_code == 401  # rule 7: always with a password
 
 
 # --- migration -------------------------------------------------------------------------------------

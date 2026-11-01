@@ -130,10 +130,6 @@
   function act(action: Verdict) {
     const it = item;
     if (!it || closing) return;
-    if (action === 'discard' && app.readonly) {
-      toast('Fora de casa não dá para descartar (modo seguro).', 'info', undefined, 2500);
-      return;
-    }
     clearTimeout(flashTimer);
     flash = action;
     flashTimer = setTimeout(() => (flash = null), 260);
@@ -411,7 +407,7 @@
 
   {#if item}
     <footer>
-      <button class="big discard" onclick={() => act('discard')} disabled={app.readonly}>
+      <button class="big discard" onclick={() => act('discard')}>
         <Icon name="trash" size={22} /><span>Descartar</span><kbd>←</kbd>
       </button>
       <button class="big important" class:on={item.important} onclick={() => act('important')}>

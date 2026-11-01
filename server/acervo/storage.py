@@ -54,9 +54,6 @@ def ensure_layout(cfg: Config) -> None:
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     for name in (*LAYOUT, *EXTRA_DIRS):
         cfg.subdir(name).mkdir(parents=True, exist_ok=True)
-    if cfg.sd_dir is not None and cfg.sd_dir.is_dir():
-        for name in (LIBRARY_DIR, TRASH_DIR):
-            (cfg.sd_dir / name).mkdir(exist_ok=True)
 
 
 def missing_or_unwritable(cfg: Config) -> list[str]:
@@ -66,8 +63,8 @@ def missing_or_unwritable(cfg: Config) -> list[str]:
             problems.append(f"{path} não existe")
         elif not os.access(path, os.W_OK):
             problems.append(f"{path} sem permissão de escrita")
-    if cfg.sd_dir is not None and not cfg.sd_dir.is_dir():
-        problems.append(f"cartão microSD não encontrado em {cfg.sd_dir}")
+    # A missing retired microSD is not a server problem: library.alerts() warns
+    # only while kept items are still stranded on it.
     return problems
 
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpLink from './HelpLink.svelte';
   // Ajustes → Avisos (Web Push), only meaningful in the installed PWA.
   import Icon from './Icon.svelte';
   import { api, ApiError } from '../lib/api';
@@ -78,8 +79,9 @@
 
 <section class="panel">
   <h2>Avisos</h2>
+  <p class="help-line"><HelpLink slug="avisos" label="O que cada aviso quer dizer" /></p>
   {#if !standalone}
-    <p class="muted">Adicione à Tela de Início para receber avisos: backup atrasado, servidor ficando cheio, problema num HD.</p>
+    <p class="muted">Adicione à Tela de Início para receber avisos: backup atrasado, pouco espaço, lote pronto para o armazenamento, Entrada esperando triagem.</p>
   {:else if !supported}
     <p class="muted">Este aparelho não recebe avisos de web apps. No iPhone, precisa do iOS 16.4 ou mais novo e do endereço com HTTPS.</p>
   {:else if serverSupport === false}
@@ -108,6 +110,9 @@
 </section>
 
 <style>
+  .help-line {
+    margin: -4px 0 10px;
+  }
   h2 {
     font-size: 16px;
     margin-bottom: 8px;

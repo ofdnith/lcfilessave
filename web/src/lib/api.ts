@@ -48,7 +48,7 @@ function messageFor(status: number, body: unknown): string {
   if (status === 0) return 'Sem conexão com o servidor.';
   if (status === 401) return 'Sessão expirada. Entre de novo.';
   if (status === 404) return 'Não encontrado.';
-  if (status === 403) return 'Não permitido fora de casa (modo seguro).';
+  if (status === 403) return 'Não permitido.';
   if (status === 423) return 'Migração em andamento: o Acervo está só para consulta.';
   if (status === 429) return 'Muitas tentativas. Espere um pouco.';
   if (status >= 500) return 'O servidor teve um problema. Tente de novo.';
@@ -79,8 +79,6 @@ async function request<T>(method: string, path: string, body?: unknown, opts: { 
   if (!res.ok) {
     if (res.status === 401 && opts.auth401 !== false) app.auth = 'login';
     if (res.status === 423) app.migration = true;
-    // A safe-mode refusal means we're away from home even if status said otherwise.
-    if (res.status === 403 && path !== '/api/auth/app-token') app.readonly = true;
     throw new ApiError(res.status, messageFor(res.status, data), data);
   }
   return data as T;

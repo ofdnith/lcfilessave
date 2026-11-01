@@ -96,32 +96,29 @@ export interface Stats {
     used_pct: number;
     alert: boolean;
     weeks_to_next_drive: number | null;
+    /** Kept (Acervo) items whose original is still only on the server: the next batch. */
+    batch: { bytes: number; oldest_days: number | null };
     inbox_bytes: number;
     inbox_max_bytes: number | null;
     inbox_alert: boolean;
     inbox_oldest_at: string | null;
     inbox_waiting_days: number | null;
     inbox_reminder: { reasons: ('dias' | 'tamanho')[]; days: number | null; bytes: number } | null;
-    sd: SdStatus | null;
+    /** Retired microSD (01/11/2026): only while kept items are still on it. */
+    card: { present: boolean; library_bytes: number } | null;
   };
   daily_backup: { last_at: string | null; overdue: boolean };
+  /** Things to act on, most urgent first (same texts as the iPhone notifications). */
+  alerts: Alert[];
 }
 
-export interface SdStatus {
-  present: boolean;
-  for_library: boolean;
-  total_bytes: number | null;
-  free_bytes: number | null;
-  used_pct: number | null;
-  library_bytes: number;
-  pending_bytes: number;
-  alert: boolean;
-  health: {
-    damaged: number;
-    damaged_names: string[];
-    checked_recent_pct: number;
-    last_check_at: string | null;
-  };
+export interface Alert {
+  id: 'espaco' | 'lote' | 'entrada' | 'backup_atrasado' | 'cartao';
+  level: 'danger' | 'warn' | 'info';
+  title: string;
+  text: string;
+  /** "/#/route…" inside the app */
+  href: string;
 }
 
 export type Action = 'keep' | 'discard' | 'restore' | 'important' | 'unimportant';
@@ -231,6 +228,8 @@ export interface Settings {
   archive_copies: number;
   server_name: string;
   version: string;
+  inbox_max_gb: number;
+  storage_alert_pct: number;
 }
 
 export interface Health {
@@ -259,7 +258,6 @@ export interface AuthStatus {
   authenticated: boolean;
   method: 'cookie' | 'token' | 'local' | null;
   remote?: boolean;
-  readonly?: boolean;
 }
 
 export interface InboxSummary {
@@ -301,4 +299,4 @@ export interface ApiToken {
   last_used_at: string | null;
 }
 
-export type PushTopic = 'backup_atrasado' | 'espaco' | 'hd_problema' | 'backup_concluido' | 'entrada' | 'cartao';
+export type PushTopic = 'backup_atrasado' | 'espaco' | 'lote' | 'hd_problema' | 'backup_concluido' | 'entrada';

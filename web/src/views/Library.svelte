@@ -153,9 +153,7 @@
         <Icon name="albumAdd" size={15} /><span class="hide-sm">Adicionar ao álbum</span>
       </button>
       <button class="btn small" disabled={!selection.size} onclick={() => batch('important')} aria-label="Marcar como importante"><Icon name="star" size={15} /></button>
-      {#if !app.readonly}
         <button class="btn small danger" disabled={!selection.size} onclick={() => batch('discard')} aria-label="Mover para lixeira"><Icon name="trash" size={15} /></button>
-      {/if}
     </SelectionBar>
   {/if}
 
@@ -167,9 +165,10 @@
 <style>
   .top {
     position: sticky;
-    top: 0;
+    /* Stuck: always below the status bar, whether or not banners took the inset. */
+    top: calc(var(--sat) - var(--page-top, var(--sat)));
     z-index: 10;
-    padding: calc(var(--sat) + 14px) 24px 0;
+    padding: calc(var(--page-top, var(--sat)) + 14px) 24px 0;
     background: color-mix(in srgb, var(--bg) 92%, transparent);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
@@ -232,7 +231,7 @@
   }
   @media (max-width: 899px) {
     .top {
-      padding: calc(var(--sat) + 10px) 16px 0;
+      padding: calc(var(--page-top, var(--sat)) + 10px) 16px 0;
     }
     .content {
       padding: 6px 16px 24px;

@@ -367,15 +367,13 @@ class ActionBody(BaseModel):
 @router.post("/items/actions")
 async def actions(body: ActionBody, request: Request) -> dict:
     cfg = request.app.state.config
-    if body.action == "discard":
-        auth.forbid_remote(request)
     try:
         return await run_in_threadpool(library.apply_action, cfg, body.ids, body.action, "web")
     except library.ActionError as exc:
         raise HTTPException(400, str(exc)) from None
 
 
-@router.post("/trash/purge-expired", dependencies=[Depends(auth.forbid_remote)])
+@router.post("/trash/purge-expired")
 async def purge(request: Request) -> dict:
     return {"purged": await run_in_threadpool(library.purge_expired, request.app.state.config, "web")}
 
@@ -478,6 +476,9 @@ def stats(request: Request) -> dict:
             "daily_backup": daily_status(conn),
         }
         summary = library.storage_summary(cfg, conn)
+        # Banners in the app; the same texts go out as iPhone notifications (jobs._notices).
+        data["alerts"] = library.alerts(cfg, conn, daily_overdue=data["daily_backup"]["overdue"])
+        batch = library.pending_archive(cfg, conn)
     finally:
         conn.close()
     usage = disk_usage(cfg.data_dir)
@@ -491,6 +492,8 @@ def stats(request: Request) -> dict:
         "used_pct": usage.used_pct,
         "alert": usage.used_pct >= cfg.storage_alert_pct or server_bytes >= budget,
         "weeks_to_next_drive": _weeks(budget - server_bytes, weekly),
+        # Kept items still only on the server: what the next batch would take.
+        "batch": batch,
         **summary,
     }
     return data
@@ -519,7 +522,7 @@ def settings(request: Request) -> dict:
     return {"archive_batch_gb": cfg.archive_batch_gb, "trash_days": cfg.trash_days,
             "archive_copies": cfg.archive_copies, "server_name": cfg.server_name, "version": __version__,
             "battery": power.battery(), "inbox_max_gb": cfg.inbox_max_gb,
-            "sd_for_library": cfg.sd_for_library, "thermal": _thermal(request)}
+            "storage_alert_pct": cfg.storage_alert_pct, "thermal": _thermal(request)}
 
 
 def _thermal(request: Request) -> dict | None:

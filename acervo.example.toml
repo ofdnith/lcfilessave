@@ -27,19 +27,20 @@ https = false
 # Alerta quando o disco passar desta porcentagem.
 storage_alert_pct = 80
 
-# Tamanho de um lote para transferir a um HD, em GB.
+# Tamanho de um lote para transferir a um armazenamento (HD, SSD, pendrive…), em GB.
 archive_batch_gb = 5
 
-# Em quantos HDs cada arquivo precisa estar (verificado) antes de sair do servidor.
-# 1 = um HD; 2 = dois HDs (espelho, recomendado para não depender de um disco só).
+# Em quantos armazenamentos cada arquivo precisa estar (verificado) antes de sair do servidor.
+# 1 = um; 2 = dois (espelho, recomendado para não depender de um disco só).
 archive_copies = 1
 
 # Dias na lixeira antes de apagar de vez (mínimo 30).
 trash_days = 30
 
-# Tamanho máximo da Entrada (aguardando triagem), em GB. 0 = sem limite.
-# Passou disso, o servidor recusa novos envios até a triagem liberar espaço.
-inbox_max_gb = 100
+# Tamanho máximo da Entrada (aguardando triagem), em GB. 0 = sem limite (os
+# envios só param quando o disco acabar). Com limite, passou disso o servidor
+# recusa novos envios até a triagem liberar espaço.
+inbox_max_gb = 0
 
 # Lembrete de triagem: avisa quando algo está na Entrada há mais destes dias
 # ou quando ela passa destes GB (o que está na Entrada só existe no celular).
@@ -51,20 +52,19 @@ inbox_alert_gb = 5
 # e voltam 3 °C abaixo. O celular vive na tomada; isso poupa a bateria.
 max_temp_c = 40
 
-# Cartão microSD (Realme): veja docs/realme.md.
+# Lembrete de lote: avisa quando algo mantido no Acervo está só no servidor há
+# mais destes dias (além de quando o lote chega a archive_batch_gb). 0 desliga.
+archive_alert_days = 14
+
+# Cartão microSD: aposentado em 01/11/2026 (nada novo vai para ele). Se o seu
+# acervo.toml ainda tem sd_dir, deixe o cartão no celular até o que estava lá
+# voltar sozinho para a memória interna; depois pode apagar a linha.
 # sd_dir = "/storage/XXXX-XXXX/Android/data/com.termux/files/acervo"
-# true = tudo o que passa pela triagem vai para o cartão (cópia conferida por
-# SHA-256); a memória interna fica só com a Entrada. Do cartão, os lotes vão
-# para o HD. false = o cartão só recebe quando a memória interna passa do alerta.
-# sd_for_library = true
 
 # Cópia diária do catálogo (as 7 mais recentes ficam).
 # catalog_backup_dir = "copias-do-catalogo"
 
-# Fora de casa (pedidos que chegam pelo Tailscale):
-#   "seguro"   = ver, buscar, enviar, manter e álbuns; nada de apagar nem mexer em HDs
-#   "completo" = tudo liberado
-remote_mode = "seguro"
+# Fora de casa (pelo Tailscale) tudo funciona igual a dentro de casa, sempre com senha.
 
 # Links do iCloud dos atalhos prontos (aparecem em Ajustes → Configurar iPhone).
 # shortcut_manual_url = "https://www.icloud.com/shortcuts/…"

@@ -40,6 +40,7 @@
     transform: translate(-50%, -50%);
     width: min(440px, calc(100vw - 32px));
     max-height: min(640px, calc(100vh - 64px));
+    max-height: min(640px, calc(100dvh - 64px - var(--sat)));
     overflow-y: auto;
     background: var(--surface);
     border: 1px solid var(--line);

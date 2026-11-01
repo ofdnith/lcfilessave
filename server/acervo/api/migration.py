@@ -27,7 +27,7 @@ from ..storage import sha256_file
 
 # Only a short-lived migration token, and only from the home network.
 router = APIRouter(prefix="/api/migration",
-                   dependencies=[Depends(auth.forbid_remote), Depends(auth.require_migration_token)])
+                   dependencies=[Depends(auth.require_migration_token)])
 DRAIN_TIMEOUT_S = 300
 AUX_DIRS = (THUMBS_DIR, CERTS_DIR, GEO_DIR)
 

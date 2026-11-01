@@ -56,10 +56,27 @@ body {
 
 body {
   overscroll-behavior-y: none;
+  /* iOS: 100% can stop short of the home indicator; dvh follows the real visible height. */
+  min-height: 100dvh;
 }
 
 #app {
   height: 100%;
+  min-height: 100dvh;
+}
+
+/* With viewport-fit=cover the page runs under the clock/notch. Content scrolling
+   under it made the top of the screen look broken: keep a solid strip there. */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--sat);
+  background: var(--bg);
+  z-index: 40;
+  pointer-events: none;
 }
 
 button,
@@ -179,6 +196,10 @@ h3 {
 .page-title {
   font-size: 26px;
   margin-bottom: 4px;
+}
+/* First title of a page clears the status bar / notch (unless banners above already did). */
+.page > .page-title:first-child {
+  padding-top: var(--page-top, var(--sat));
 }
 .page-sub {
   color: var(--muted);

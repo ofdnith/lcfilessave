@@ -153,7 +153,7 @@ pub fn init_volume_at(
 ) -> Result<VolumeJson, String> {
     if !filesystem.eq_ignore_ascii_case(REQUIRED_FS) {
         return Err(format!(
-            "Este disco está formatado como {}. O Acervo só usa HDs em exFAT \
+            "Este disco está formatado como {}. O Acervo só usa armazenamentos (HD, SSD, pendrive) em exFAT \
              ({}).",
             if filesystem.is_empty() {
                 "desconhecido"

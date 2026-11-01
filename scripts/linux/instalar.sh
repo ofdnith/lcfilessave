@@ -117,7 +117,6 @@ if [[ ! -f "$CONF" ]]; then
     echo "storage_alert_pct = 80"
     echo "archive_batch_gb = 5"
     echo "archive_copies = 1"
-    echo "remote_mode = \"seguro\""
     if [[ -n "${EMAIL:-}" ]]; then echo "push_contact = \"mailto:$EMAIL\""; fi
   } > "$CONF"
   ok "criado $CONF"

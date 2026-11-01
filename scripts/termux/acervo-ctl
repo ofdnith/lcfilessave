@@ -53,16 +53,10 @@ if s.get("inbox_max_bytes"):
 r = s.get("inbox_reminder")
 if r:
     print(f"  ! faça a triagem: {r['bytes']/1e9:.1f} GB esperando" + (f", o mais antigo há {r['days']} dias" if r["days"] else ""))
-sd = s.get("sd")
-if sd and sd["present"]:
-    print(f"Cartão microSD: {sd['free_bytes']/1e9:.1f} GB livres de {sd['total_bytes']/1e9:.0f} GB"
-          f" ({sd['used_pct']}% usado) · Acervo no cartão: {sd['library_bytes']/1e9:.1f} GB")
-    if sd["pending_bytes"]:
-        print(f"  … {sd['pending_bytes']/1e9:.1f} GB do Acervo ainda só na memória interna (copiando)")
-    hh = sd.get("health") or {}
-    if hh:
-        print(f"  verificado nos últimos 30 dias: {hh['checked_recent_pct']}%"
-              + (f" · {hh['damaged']} COM DEFEITO: {', '.join(hh['damaged_names'])}" if hh["damaged"] else ""))
+card = s.get("card")
+if card and card["library_bytes"]:
+    where = "voltando sozinho para a memória interna" if card["present"] else "COLOQUE O CARTÃO DE VOLTA"
+    print(f"Cartão microSD antigo: {card['library_bytes']/1e9:.1f} GB do Acervo ainda nele ({where})")
 t = h.get("thermal")
 if t and t.get("temperature") is not None:
     print(f"Bateria: {t['temperature']:.1f} °C" + (" · tarefas PAUSADAS até esfriar" if t["paused"] else ""))

@@ -191,7 +191,7 @@ class Devices {
         } catch (e) {
           tr.copyErrors.push({ rel_path: f.rel_path, error: (e as Error).message });
           if (tr.copyErrors.length >= 5 && tr.copyErrors.length === i + 1) {
-            throw new Error('Os primeiros arquivos falharam. Confira se o HD está conectado e tem espaço.');
+            throw new Error('Os primeiros arquivos falharam. Confira se o armazenamento está conectado e tem espaço.');
           }
         }
         tr.doneBytes += f.size_bytes;

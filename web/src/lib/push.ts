@@ -4,11 +4,11 @@ import type { PushTopic } from './types';
 
 export const topicLabels: Record<PushTopic, string> = {
   backup_atrasado: 'Backup diário atrasado',
-  espaco: 'Servidor ficando cheio',
-  hd_problema: 'Problema num HD',
+  espaco: 'Pouco espaço no celular do Acervo',
+  lote: 'Lote pronto para o armazenamento',
+  hd_problema: 'Problema num armazenamento',
   backup_concluido: 'Resumo do backup diário',
   entrada: 'Entrada esperando triagem',
-  cartao: 'Problema no cartão microSD',
 };
 export const allTopics = Object.keys(topicLabels) as PushTopic[];
 

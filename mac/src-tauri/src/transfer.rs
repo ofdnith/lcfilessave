@@ -363,7 +363,7 @@ pub async fn http_error(resp: reqwest::Response) -> String {
         401 => "O servidor pediu login de novo (token inválido ou expirado).".to_string(),
         403 => "O servidor recusou o acesso.".to_string(),
         404 => "Arquivo não encontrado no servidor.".to_string(),
-        410 => "Este arquivo não está mais no servidor (já está num HD).".to_string(),
+        410 => "Este arquivo não está mais no servidor (já está num armazenamento).".to_string(),
         s => format!("O servidor respondeu com erro {s}."),
     };
     match detail {

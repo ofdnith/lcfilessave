@@ -28,6 +28,7 @@
     { route: 'lixeira', label: 'Lixeira', icon: 'trash', mobile: false },
     ...(native ? [{ route: 'dispositivos' as Route, label: 'Dispositivos', icon: 'drive' as IconName, mobile: false, also: ['esvaziar' as Route] }] : []),
     { route: 'ajustes', label: 'Ajustes', icon: 'settings', mobile: true },
+    { route: 'ajuda', label: 'Ajuda', icon: 'help', mobile: false },
   ]);
   // On the phone, screens without their own tab light up their parent.
   const mobileParent: Partial<Record<Route, Route>> = {
@@ -35,6 +36,7 @@
     lixeira: 'ajustes',
     dispositivos: 'ajustes',
     esvaziar: 'ajustes',
+    ajuda: 'ajustes',
   };
 
   const active = (it: NavItem) => router.route === it.route || !!it.also?.includes(router.route);

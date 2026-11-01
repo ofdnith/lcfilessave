@@ -11,12 +11,13 @@
   import Devices from './views/Devices.svelte';
   import EmptyIphone from './views/EmptyIphone.svelte';
   import Login from './views/Login.svelte';
-  import StorageStatus from './components/StorageStatus.svelte';
   import ConfirmSheet from './components/ConfirmSheet.svelte';
   import AlbumSheet from './components/AlbumSheet.svelte';
   import Albums from './views/Albums.svelte';
   import AlbumPage from './views/AlbumPage.svelte';
   import Places from './views/Places.svelte';
+  import Help from './views/Help.svelte';
+  import Alerts from './components/Alerts.svelte';
   import { api, ApiError } from './lib/api';
   import { isNative } from './lib/native';
   import { go, router } from './lib/router.svelte';
@@ -28,7 +29,6 @@
     try {
       const s = await api.authStatus();
       app.remote = !!s.remote;
-      app.readonly = !!s.readonly;
       app.auth = s.password_set && !s.authenticated ? 'login' : 'ok';
       if (app.auth === 'ok') void refreshStats();
     } catch (e) {
@@ -133,13 +133,11 @@
     return () => window.removeEventListener('beforeunload', h);
   });
 
-  const overdue = $derived(app.stats?.daily_backup.overdue ?? false);
-  const reminder = $derived(app.stats?.storage.inbox_reminder ?? null);
-  const sdHealth = $derived(app.stats?.storage.sd?.health ?? null);
-
-  function gbText(n: number): string {
-    return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: n >= 10e9 ? 0 : 1 }).format(n / 1e9);
-  }
+  // Banners on top take the status-bar inset themselves; the page below must not add it again.
+  const alertsShown = $derived(
+    (app.stats?.alerts ?? []).length > 0 && router.route !== 'ajuda',
+  );
+  const hasTop = $derived(app.migration || !!safeUrl || alertsShown);
 </script>
 
 <svelte:window onkeydown={onKey} ondragenter={dragEnter} ondragleave={dragLeave} ondragover={dragOver} ondrop={drop} />
@@ -157,48 +155,21 @@
   <Login />
 {:else}
   <Nav />
-  <main class="main">
-    {#if app.migration}
-      <div class="banner danger top-banner" role="status">
-        <Icon name="lock" size={18} /> Migração em andamento — o Acervo está só para consulta
-      </div>
-    {/if}
-    {#if app.readonly}
-      <div class="slim" role="status">
-        <Icon name="shield" size={15} /> Fora de casa · modo seguro (não dá para apagar nem mexer em HDs)
-      </div>
-    {/if}
-    {#if safeUrl}
-      <a class="banner top-banner" href={safeUrl}>
-        <Icon name="shield" size={18} />
-        <span>Há um endereço seguro para o Acervo. Abra por ele e salve na Tela de Início: funciona no Safari sem instalar certificado.</span>
-      </a>
-    {/if}
-    {#if overdue}
-      <div class="banner top-banner" role="status"><Icon name="alert" size={18} /> Backup diário atrasado: mais de 48 h</div>
-    {/if}
-    {#if reminder && router.route !== 'entrada'}
-      <a class="banner top-banner" href="#/entrada">
-        <Icon name="alert" size={18} />
-        <span>
-          Entrada esperando triagem: {gbText(reminder.bytes)} GB{#if reminder.days}, a mais antiga há {reminder.days}
-            {reminder.days === 1 ? 'dia' : 'dias'}{/if}. Até a triagem, isso só existe no celular.
-        </span>
-      </a>
-    {/if}
-    {#if sdHealth && sdHealth.damaged > 0}
-      <div class="banner danger top-banner" role="status">
-        <Icon name="alert" size={18} />
-        <span>
-          {sdHealth.damaged === 1 ? '1 arquivo do cartão microSD não confere' : `${sdHealth.damaged} arquivos do cartão microSD não conferem`}
-          ({sdHealth.damaged_names.join(', ')}{sdHealth.damaged > sdHealth.damaged_names.length ? '…' : ''}). Se ainda
-          estiverem no iPhone, o próximo backup diário os recupera. Considere trocar o cartão.
-        </span>
-      </div>
-    {/if}
-    {#if app.stats?.storage.alert}
-      <div class="banner danger top-banner" role="status">
-        <Icon name="drive" size={18} /> Servidor quase cheio. Transfira um lote para um HD pelo app do computador.
+  <main class="main" class:has-top={hasTop}>
+    {#if hasTop}
+      <div class="top-stack">
+        {#if app.migration}
+          <div class="banner danger" role="status">
+            <Icon name="lock" size={18} /> Migração em andamento — o Acervo está só para consulta
+          </div>
+        {/if}
+        {#if safeUrl}
+          <a class="banner" href={safeUrl}>
+            <Icon name="shield" size={18} />
+            <span>Há um endereço seguro para o Acervo. Abra por ele e salve na Tela de Início: funciona no Safari sem instalar certificado.</span>
+          </a>
+        {/if}
+        {#if alertsShown}<Alerts />{/if}
       </div>
     {/if}
     {#if router.route === 'acervo'}
@@ -210,7 +181,6 @@
     {:else if router.route === 'enviar'}
       <Upload />
     {:else if router.route === 'ajustes'}
-      <div class="mobile-status"><StorageStatus /></div>
       <Settings />
     {:else if router.route === 'dispositivos'}
       <Devices />
@@ -222,6 +192,8 @@
       {#key router.param}<AlbumPage id={Number(router.param)} />{/key}
     {:else if router.route === 'lugares'}
       <Places />
+    {:else if router.route === 'ajuda'}
+      {#key router.param}<Help slug={router.param} />{/key}
     {/if}
   </main>
   <Viewer />
@@ -237,33 +209,22 @@
 
 <style>
   .main {
+    /* Top inset for the page header: the status bar / notch, unless banners already took it. */
+    --page-top: var(--sat);
     margin-left: var(--sidebar);
     min-height: 100%;
+    min-height: 100dvh;
     padding-right: var(--sar);
   }
-  .top-banner {
-    margin: calc(var(--sat) + 12px) 24px 0;
+  .main.has-top {
+    --page-top: 0px;
   }
-  .top-banner + .top-banner {
-    margin-top: 8px;
-  }
-  .slim {
+  .top-stack {
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
     gap: 8px;
-    padding: calc(var(--sat) + 6px) 16px 6px;
-    background: rgba(143, 185, 255, 0.12);
-    color: var(--info);
-    font-size: 12.5px;
-    font-weight: 560;
-    text-align: center;
-  }
-  .slim + .top-banner {
-    margin-top: 10px;
-  }
-  .mobile-status {
-    display: none;
+    padding: calc(var(--sat) + 12px) 24px 0;
+    max-width: 1148px;
   }
   .splash {
     height: 100%;
@@ -321,15 +282,8 @@
       padding-left: var(--sal);
       padding-bottom: calc(var(--tabbar) + var(--sab));
     }
-    .top-banner {
-      margin: calc(var(--sat) + 10px) 16px 0;
-    }
-    .mobile-status {
-      display: block;
-      padding: calc(var(--sat) + 16px) 16px 0;
-    }
-    .mobile-status + :global(.page .page-title) {
-      padding-top: 0;
+    .top-stack {
+      padding: calc(var(--sat) + 10px) 16px 0;
     }
   }
 </style>

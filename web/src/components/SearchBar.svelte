@@ -80,9 +80,9 @@
       <Icon name="star" size={14} fill={app.filters.important} /> Importante
     </button>
     {#if showArchived}
-      <button class="chip" class:on={app.filters.archived !== null} onclick={cycleArchived} title="Alterna entre: todos, só no HD, só no servidor">
+      <button class="chip" class:on={app.filters.archived !== null} onclick={cycleArchived} title="Alterna entre: todos, só nos armazenamentos, só no servidor">
         <Icon name={app.filters.archived === '0' ? 'server' : 'drive'} size={14} />
-        {app.filters.archived === '1' ? 'Só no HD' : app.filters.archived === '0' ? 'Só no servidor' : 'HD ou servidor'}
+        {app.filters.archived === '1' ? 'Arquivados' : app.filters.archived === '0' ? 'Só no servidor' : 'Onde estiver'}
       </button>
     {/if}
     {#if anyFilter}
@@ -161,6 +161,14 @@
   }
   .chips::-webkit-scrollbar {
     display: none;
+  }
+  /* Phone: the chip row scrolls edge to edge instead of being cut at the margin. */
+  @media (max-width: 899px) {
+    .chips {
+      margin: 0 -16px;
+      padding: 0 16px 2px;
+      scroll-padding: 0 16px;
+    }
   }
   .chip {
     position: relative;

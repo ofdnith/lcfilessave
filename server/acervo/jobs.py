@@ -22,12 +22,11 @@ import threading
 import time
 from datetime import date
 
-from . import db, media, power, sdcard
+from . import db, media, power
 from .catalog import get_setting, iso_in, medium_path, now_iso, preview_path, set_setting, thumb_path, transaction
 from .config import Config
 from .ingest import add_suggestion
-from .library import (inbox_reminder_text, migrate_to_sd, purge_expired, resolve_suggestions, sd_available,
-                      storage_summary)
+from .library import alerts, bring_back_from_card, purge_expired, resolve_suggestions
 from .neardup import PhashIndex
 from .places import Gazetteer
 from .textextract import extract_text, ocr_image
@@ -37,28 +36,6 @@ log = logging.getLogger(__name__)
 NEAR_DUP_DISTANCE = 10
 MAX_ATTEMPTS = 5
 PREVIEW_CACHE_BYTES = 2_000_000_000
-SD_RESCUE_DIR = "acervo-resgate"
-SD_README = """ACERVO — cartão microSD
-
-Este cartão guarda tudo o que já passou pela triagem e ainda não foi para um HD.
-Se o celular se perder, os arquivos continuam aqui:
-
-  acervo/AAAA/MM/fotos, videos, docs, audios, outros   os originais, intactos
-  acervo-resgate/catalogo-AAAA-MM-DD.db                 cópia diária do catálogo
-
-Para ler num computador: tire o cartão, use um leitor e abra a pasta
-Android/data/com.termux/files/acervo. Os arquivos são comuns (JPEG, HEIC, MOV…).
-
-Para voltar a ter o Acervo completo num celular novo: instale o Acervo,
-copie o catálogo mais recente para ~/acervo-dados/catalogo.db, aponte sd_dir
-para esta pasta e rode `acervo-ctl verificar` (o que estava só na Entrada
-vai aparecer como não encontrado).
-
-O que já foi para HD está nos HDs; o que ainda estava na Entrada (sem triagem)
-estava só no celular.
-"""
-
-
 class RetryLater(Exception):
     """Not an error: the job cannot run yet (e.g. city database not downloaded)."""
 
@@ -89,8 +66,8 @@ class Worker:
     def start(self) -> None:
         self.recover()
         loops = [(self._loop, "acervo-jobs"), (self._maintenance_loop, "acervo-maintenance")]
-        if self.cfg.sd_for_library:
-            loops.append((self._sd_loop, "acervo-sd"))
+        if self.cfg.sd_dir is not None:
+            loops.append((self._card_loop, "acervo-cartao"))
         if self.cfg.https:
             loops.append((self._public_name_loop, "acervo-enderecos"))
         for target, name in loops:
@@ -125,9 +102,9 @@ class Worker:
                 self._wake.wait(timeout=5)
                 self._wake.clear()
 
-    def _sd_loop(self) -> None:
-        """Keeps the microSD in step with the Acervo: whatever was kept in triage
-        is copied there (verified) within minutes. Idle checks once a minute."""
+    def _card_loop(self) -> None:
+        """Brings what is still on the retired microSD back to the phone (verified).
+        Idle, it checks every 10 minutes (room may have opened up after a batch)."""
         try:
             os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 10)
         except (AttributeError, OSError):
@@ -135,11 +112,11 @@ class Worker:
         while not self._stop.is_set():
             moved = 0
             try:
-                moved = migrate_to_sd(self.cfg)
+                moved = bring_back_from_card(self.cfg)
             except Exception:
-                log.exception("Erro ao copiar para o cartão microSD")
+                log.exception("Erro ao trazer itens do cartão microSD")
             if not moved:
-                self._stop.wait(timeout=60)
+                self._stop.wait(timeout=600)
 
     def _public_name_loop(self) -> None:
         """DuckDNS addresses and Let's Encrypt certificates (publicname.py). Its own
@@ -350,44 +327,27 @@ class Worker:
             if cfg.catalog_backup_dir is not None and get_setting(conn, "last_backup_date") != today:
                 self._backup_catalog(conn, today, cfg.catalog_backup_dir)
                 set_setting(conn, "last_backup_date", today)
-            if cfg.sd_for_library and sd_available(cfg) and get_setting(conn, "last_sd_backup_date") != today:
-                self._backup_to_sd(conn, today)
-                set_setting(conn, "last_sd_backup_date", today)
-            try:
-                sdcard.maintain(cfg, conn, today, notify=self._push)
-            except (OSError, sqlite3.Error):
-                log.exception("Erro na manutenção do cartão microSD")
             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         finally:
             conn.close()
         self._trim_previews()
 
-    def _push(self, topic: str, title: str, body: str, url: str) -> None:
-        from . import push
-        push.notify(self.cfg, topic, title, body, url)
-
     def _notices(self, conn: sqlite3.Connection, today: str) -> None:
-        """Push notifications for things the owner should know without opening the app."""
+        """Push notifications for the alerts (library.alerts), so the owner knows
+        without opening the app. Each one at most every 3 days (daily when urgent)."""
         from . import push
-        from .storage import disk_usage
         last = get_setting(conn, "last_daily_backup_at")
-        if last and last < iso_in(-2) and get_setting(conn, "notice_overdue_date") != today:
-            set_setting(conn, "notice_overdue_date", today)
-            push.notify(self.cfg, "backup_atrasado", "Backup diário atrasado",
-                        "O iPhone não manda fotos há mais de 48 horas. Confira a automação do Atalhos.", "/#/ajustes")
-        usage = disk_usage(self.cfg.data_dir)
-        server_bytes = conn.execute("SELECT coalesce(sum(size_bytes), 0) FROM files WHERE rel_path IS NOT NULL").fetchone()[0]
-        full = usage.used_pct >= self.cfg.storage_alert_pct or server_bytes >= self.cfg.archive_batch_gb * 1_000_000_000
-        last_space = get_setting(conn, "notice_space_at")
-        if full and (not last_space or last_space < iso_in(-3)):
-            set_setting(conn, "notice_space_at", now_iso())
-            push.notify(self.cfg, "espaco", "Servidor ficando cheio",
-                        f"{server_bytes / 1e9:.0f} GB no servidor. Hora de transferir um lote para um HD.", "/")
-        reminder = storage_summary(self.cfg, conn)["inbox_reminder"]
-        last_inbox = get_setting(conn, "notice_inbox_at")
-        if reminder and (not last_inbox or last_inbox < iso_in(-3)):
-            set_setting(conn, "notice_inbox_at", now_iso())
-            push.notify(self.cfg, "entrada", "Entrada esperando triagem", inbox_reminder_text(reminder), "/#/entrada")
+        overdue = bool(last and last < iso_in(-2))
+        for alert in alerts(self.cfg, conn, daily_overdue=overdue):
+            if not alert["topic"]:
+                continue
+            key = f"notice_{alert['id']}_at"
+            every = 1 if alert["level"] == "danger" or alert["id"] == "backup_atrasado" else 3
+            sent = get_setting(conn, key)
+            if sent and sent >= iso_in(-every):
+                continue
+            set_setting(conn, key, now_iso())
+            push.notify(self.cfg, alert["topic"], alert["title"], alert["text"], alert["href"])
 
     def _backfill_medium(self, conn: sqlite3.Connection) -> None:
         """Items from before medium previews existed: render them, 500 per round."""
@@ -405,7 +365,6 @@ class Worker:
 
     def _clean_tmp(self) -> None:
         """Catalog snapshots left behind by interrupted downloads."""
-        import time
         for p in self.cfg.subdir("tmp").glob("tmp*.db"):
             try:
                 if time.time() - p.stat().st_mtime > 86400:
@@ -421,17 +380,6 @@ class Worker:
             (self.cfg.subdir("tmp") / "uploads" / f"{row['id']}.part").unlink(missing_ok=True)
         conn.execute("DELETE FROM uploads WHERE status IN ('receiving', 'cancelled') AND updated_at < ?", (iso_in(-7),))
         conn.execute("DELETE FROM uploads WHERE status IN ('done', 'failed') AND updated_at < ?", (iso_in(-30),))
-
-    def _backup_to_sd(self, conn: sqlite3.Connection, today: str) -> None:
-        """If the phone is lost, the card alone must be enough: the originals are
-        in acervo/AAAA/MM/…, and next to them a copy of the catalog (dates,
-        places, which HD holds what) and a note on how to use it."""
-        folder = self.cfg.sd_dir / SD_RESCUE_DIR
-        try:
-            self._backup_catalog(conn, today, folder, keep=3)
-            (folder / "LEIA-ME.txt").write_text(SD_README, encoding="utf-8")
-        except OSError as exc:
-            log.warning("Não consegui salvar a cópia do catálogo no cartão: %s", exc)
 
     def _backup_catalog(self, conn: sqlite3.Connection, today: str, dest_dir, keep: int = 7) -> None:
         dest_dir.mkdir(parents=True, exist_ok=True)
