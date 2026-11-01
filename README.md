@@ -17,7 +17,7 @@ catálogo continua navegável e buscável mesmo depois que os originais vão par
 | [docs/realme.md](docs/realme.md) | Instalar o servidor no Realme (Termux) |
 | [docs/migrar.md](docs/migrar.md) | Mudar o Acervo para um mini PC (ou outra máquina) |
 | [docs/iphone.md](docs/iphone.md) | Web app, certificado, Atalhos e backup diário |
-| [mac/README.md](mac/README.md) | Compilar e usar o app do Mac (HDs, Esvaziar iPhone) |
+| [mac/README.md](mac/README.md) | Baixar ou compilar o app do Mac e do Windows (HDs, Esvaziar iPhone) |
 | [docs/especificacao.md](docs/especificacao.md) | O plano do projeto (fonte da verdade) |
 | [docs/api.md](docs/api.md) | A API do servidor |
 | [docs/esquema-catalogo.md](docs/esquema-catalogo.md) | O `catalogo.db`, tabela por tabela |
@@ -47,6 +47,10 @@ catálogo continua navegável e buscável mesmo depois que os originais vão par
 | Avisos no iPhone | Backup atrasado, servidor cheio, problema num HD, resumo do backup (Web Push, sem abrir portas) |
 | Modo seguro fora de casa | Pelo Tailscale dá para ver e enviar, mas não apagar nem mexer em HDs |
 | Migração | `acervo migrar` leva tudo para um mini PC conferindo cada arquivo; instalador para Linux com serviço do sistema |
+| App para Windows e Releases | O app do computador agora também roda no Windows; o GitHub compila Mac e Windows e publica em Releases a cada tag `app-v*` |
+| Entrada com fotos inteiras | A grade da Entrada mostra cada foto no formato dela, sem cortar (botão para voltar aos quadrados; o Acervo também tem) |
+| Modo rápido mais leve | Cartão no formato da foto, prévia leve em vez do original, ações sem esperar o servidor, próximas fotos pré-carregadas, arrastar também com o mouse |
+| Aviso de HD em 5 GB | O lote para HD passou de 80 GB para 5 GB (`archive_batch_gb`) |
 
 **Fase 7:** o modelo CLIP precisa do `onnxruntime`, que não tem versão para o
 Termux/Android; no Snapdragon 680 cada foto levaria segundos. A fila de tarefas

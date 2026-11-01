@@ -157,7 +157,7 @@
     {/if}
     {#if app.stats?.storage.alert}
       <div class="banner danger top-banner" role="status">
-        <Icon name="drive" size={18} /> Servidor quase cheio. Transfira um lote para um HD pelo app do Mac.
+        <Icon name="drive" size={18} /> Servidor quase cheio. Transfira um lote para um HD pelo app do computador.
       </div>
     {/if}
     {#if router.route === 'acervo'}

@@ -47,6 +47,9 @@
     calendar: 'M4 6h16v14H4z M4 10h16 M8 3v4 M16 3v4',
     zoom: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13z M20 20l-4.6-4.6 M10.5 8v5 M8 10.5h5',
     lock: 'M6 11h12v10H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+    grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
+    rows: 'M3 5h7v6H3z M12 5h9v6h-9z M3 13h10v6H3z M15 13h6v6h-6z',
+    hd: 'M3 6h18v12H3z M7 9.5v5 M7 12h3 M10 9.5v5 M13.5 9.5v5h1.5a2.5 2.5 0 0 0 0-5z',
   } as const;
   export type IconName = keyof typeof paths;
 </script>

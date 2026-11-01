@@ -13,6 +13,7 @@
   import { pickAlbum } from '../lib/sheets.svelte';
   import type { Action } from '../lib/types';
   import { api } from '../lib/api';
+  import { prefs, toggleFit } from '../lib/prefs.svelte';
   import { monthLabel, plural } from '../lib/format';
   import { ItemList } from '../lib/itemlist.svelte';
   import { trackMonth } from '../lib/scrollmonth';
@@ -94,6 +95,16 @@
     <div class="tabs-row">
       <KindTabs value={app.kind} tabs={app.stats?.tabs ?? null} onchange={(k) => (app.kind = k)} />
       <a class="places-link" href={href('lugares')} aria-label="Lugares"><Icon name="map" size={18} /><span>Lugares</span></a>
+      {#if layout === 'grid'}
+        <button
+          class="btn small ghost sel-btn"
+          onclick={() => toggleFit('library')}
+          aria-label={prefs.libraryFit === 'full' ? 'Ver em quadrados' : 'Ver fotos inteiras'}
+          title={prefs.libraryFit === 'full' ? 'Ver em quadrados' : 'Ver fotos inteiras'}
+        >
+          <Icon name={prefs.libraryFit === 'full' ? 'grid' : 'rows'} size={16} />
+        </button>
+      {/if}
       <button class="btn small ghost sel-btn" onclick={() => (selecting ? stopSelecting() : (selecting = true))} aria-pressed={selecting}>
         <Icon name="select" size={16} /><span class="sel-lbl">{selecting ? 'Cancelar' : 'Selecionar'}</span>
       </button>
@@ -124,6 +135,7 @@
     <ItemBrowser
       {list}
       {layout}
+      fit={prefs.libraryFit}
       {selection}
       {selecting}
       onselectstart={() => (selecting = true)}

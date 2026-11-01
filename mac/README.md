@@ -1,7 +1,7 @@
-# Acervo para Mac
+# Acervo para Mac e Windows
 
-O app do Mac é uma janela que mostra a mesma interface do Acervo que você usa
-no navegador, carregada direto do seu servidor, mais o que só o Mac consegue fazer:
+O app do computador é uma janela que mostra a mesma interface do Acervo que você usa
+no navegador, carregada direto do seu servidor, mais o que só o computador consegue fazer:
 
 - **Dispositivos:** mostra o servidor e os HDs plugados, atualizando sozinho.
 - **Volumes:** reconhece HDs do Acervo pelo arquivo `.acervo/volume.json` e
@@ -11,11 +11,40 @@ no navegador, carregada direto do seu servidor, mais o que só o Mac consegue fa
   o servidor pode apagar a cópia dele (regra 3). Uma cópia que não confere é
   apagada do HD e o arquivo continua no servidor.
 - **Verificar saúde:** relê arquivos do HD e confere os hashes.
-- **Enviar pastas:** escolhe uma pasta do Mac (ou arrasta arquivos para a
+- **Enviar pastas:** escolhe uma pasta do computador (ou arrasta arquivos para a
   janela) e envia ao servidor, conferindo o hash.
 
 O app só trabalha **enquanto está aberto**: não fica nada rodando em segundo
 plano, nem ícone na barra de menus.
+
+## Baixar pronto (recomendado)
+
+Na página do projeto no GitHub, abra **Releases** e baixe a versão mais nova:
+
+- **Mac** (Intel e Apple Silicon): `Acervo_X.Y.Z_universal.dmg`. Abra e arraste o
+  Acervo para **Aplicativos**.
+- **Windows** (10 e 11): `Acervo_X.Y.Z_x64-setup.exe`. Instale (não pede senha de
+  administrador). Se aparecer **"O Windows protegeu o computador"**, clique em
+  **Mais informações › Executar assim mesmo**: o aviso aparece porque o app não tem
+  certificado pago da Microsoft.
+
+No Windows, os HDs aparecem pela letra (`E:`, `F:`…). Para formatar um HD em exFAT:
+Explorador de Arquivos › botão direito no disco › **Formatar** › Sistema de arquivos
+**exFAT** (isso apaga o HD). Para o certificado do servidor: abra
+`https://<servidor>:8765/ca.crt`, dê dois cliques no arquivo › **Instalar Certificado** ›
+**Usuário Atual** › **Colocar todos os certificados no repositório a seguir** ›
+**Autoridades de Certificação Raiz Confiáveis**.
+
+### Publicar uma versão nova (para quem mantém o projeto)
+
+O GitHub compila os dois sozinho (`.github/workflows/app.yml`):
+
+1. Aumente `version` em `mac/src-tauri/tauri.conf.json` (ex.: `0.2.0`).
+2. Crie e envie a tag com o mesmo número: `git tag app-v0.2.0 && git push origin app-v0.2.0`.
+3. Em uns 15 minutos o `.dmg` e o `-setup.exe` aparecem em **Releases**.
+
+Todo pull request que mexe em `mac/` também compila os dois; os instaladores ficam
+como artefatos da execução (aba **Actions**) por 30 dias.
 
 ## Como gerar o app no seu Mac (passo a passo)
 

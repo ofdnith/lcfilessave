@@ -1,0 +1,101 @@
+# Builds the desktop app (Tauri, in mac/) for macOS and Windows.
+#
+# - Pull requests and manual runs: build both, keep the installers as run artifacts.
+# - A tag "app-vX.Y.Z" (same version as mac/src-tauri/tauri.conf.json): build both and
+#   publish them on the GitHub Releases page.
+#
+# The apps are not signed with paid certificates: macOS gets an ad-hoc signature
+# ("Abrir Mesmo Assim" in Privacidade e Segurança the first time) and Windows shows the
+# SmartScreen notice ("Mais informações › Executar assim mesmo"). See mac/README.md.
+name: App (Mac e Windows)
+
+on:
+  push:
+    tags: ["app-v*"]
+  pull_request:
+    paths:
+      - "mac/**"
+      - ".github/workflows/app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Intel e Apple Silicon)
+            os: macos-latest
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin --bundles app,dmg
+            artifact: Acervo-macOS
+            paths: mac/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - name: Windows
+            os: windows-latest
+            rust_targets: ""
+            args: --bundles nsis
+            artifact: Acervo-Windows
+            paths: mac/src-tauri/target/release/bundle/nsis/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mac/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mac/src-tauri -> target
+
+      - name: Dependências
+        working-directory: mac
+        run: npm ci --no-audit --no-fund
+
+      # The unit tests touch files, HTTP and hashing; they run on both systems.
+      - name: Testes do app
+        working-directory: mac/src-tauri
+        run: cargo test
+
+      - name: Compilar e (em tag) publicar
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: mac
+          tauriScript: npx tauri
+          args: ${{ matrix.args }}
+          tagName: ${{ startsWith(github.ref, 'refs/tags/app-v') && github.ref_name || '' }}
+          releaseName: "Acervo para Mac e Windows ${{ github.ref_name }}"
+          releaseBody: |
+            **Mac:** baixe o `.dmg`, abra e arraste o Acervo para Aplicativos. Na primeira vez,
+            Ajustes do Sistema › Privacidade e Segurança › **Abrir Mesmo Assim**.
+
+            **Windows:** baixe o `-setup.exe` e instale. Se aparecer "O Windows protegeu o computador",
+            clique em **Mais informações › Executar assim mesmo**.
+
+            Passo a passo completo em `mac/README.md`.
+          releaseDraft: false
+          prerelease: false
+
+      - name: Guardar instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+          retention-days: 30

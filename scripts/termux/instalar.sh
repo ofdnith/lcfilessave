@@ -85,7 +85,7 @@ if [[ ! -f "$CONF" ]]; then
     echo -n "tls_names = [\"$IP\""; [[ -n "$TS_NAME" ]] && echo -n ", \"$TS_NAME\""; echo "]"
     [[ -n "$BACKUP_DIR" ]] && echo "catalog_backup_dir = \"$BACKUP_DIR\""
     echo "storage_alert_pct = 80"
-    echo "archive_batch_gb = 80"
+    echo "archive_batch_gb = 5"
     echo "archive_copies = 1"
     if [[ -n "${EMAIL:-}" ]]; then echo "push_contact = \"mailto:$EMAIL\""; fi
   } > "$CONF"

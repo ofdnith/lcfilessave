@@ -73,7 +73,7 @@
 
   {#if isNative()}
     <section class="panel">
-      <h2>App do Mac</h2>
+      <h2>App do computador</h2>
       <p class="muted">HDs, transferências e o Esvaziar iPhone ficam em <a href={href('dispositivos')}>Dispositivos</a>.</p>
     </section>
   {/if}
@@ -86,14 +86,14 @@
         <li>Toque em <strong>Compartilhar</strong> <span class="inline-icon"><Icon name="share" size={16} /></span>.</li>
         <li>Escolha <strong>Adicionar à Tela de Início</strong> e confirme.</li>
       </ol>
-      <p class="muted small">O Acervo abre em tela cheia, como um app. {isIOS ? '' : 'No Mac, use o app próprio ou o navegador.'}</p>
+      <p class="muted small">O Acervo abre em tela cheia, como um app. {isIOS ? '' : 'No Mac ou no Windows, use o app próprio ou o navegador.'}</p>
     </section>
   {/if}
 
   <section class="panel">
     <h2>Certificado de segurança</h2>
     <p class="muted">
-      Se o servidor usa HTTPS próprio, o iPhone e o Mac precisam confiar no certificado dele uma vez.
+      Se o servidor usa HTTPS próprio, o iPhone e o computador precisam confiar no certificado dele uma vez.
       Baixe, instale e, no iPhone, ative em Ajustes → Geral → Sobre → Ajustes de Confiança de Certificados.
     </p>
     <a class="btn small" href="/ca.crt" download="acervo-ca.crt"><Icon name="shield" size={16} /> Baixar certificado</a>

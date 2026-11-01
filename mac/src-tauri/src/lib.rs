@@ -480,6 +480,24 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         None::<&str>,
     )?;
     let reload = MenuItem::with_id(app, MENU_RELOAD, "Recarregar", true, Some("CmdOrCtrl+R"))?;
+    // Windows: a plain menu bar (no app menu, hide/show-all do not exist there, and
+    // WebView2 already handles Ctrl+C/V/A without an Edit menu).
+    #[cfg(windows)]
+    {
+        let file = Submenu::with_items(
+            app,
+            "Arquivo",
+            true,
+            &[
+                &change,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, Some("Sair do Acervo"))?,
+            ],
+        )?;
+        let view = Submenu::with_items(app, "Visualizar", true, &[&reload])?;
+        return Menu::with_items(app, &[&file, &view]);
+    }
+    #[allow(unreachable_code)]
     let app_menu = Submenu::with_items(
         app,
         "Acervo",

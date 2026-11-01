@@ -1,7 +1,7 @@
 [package]
 name = "acervo"
 version = "0.1.0"
-description = "Acervo — app do Mac (dispositivos e arquivamento)"
+description = "Acervo — app do Mac e do Windows (dispositivos e arquivamento)"
 edition = "2021"
 publish = false
 
@@ -27,6 +27,13 @@ hex = "0.4"
 bytes = "1"
 libc = "0.2"
 urlencoding = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

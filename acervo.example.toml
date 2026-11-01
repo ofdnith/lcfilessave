@@ -23,7 +23,7 @@ https = false
 storage_alert_pct = 80
 
 # Tamanho de um lote para transferir a um HD, em GB.
-archive_batch_gb = 80
+archive_batch_gb = 5
 
 # Em quantos HDs cada arquivo precisa estar (verificado) antes de sair do servidor.
 # 1 = um HD; 2 = dois HDs (espelho, recomendado para não depender de um disco só).

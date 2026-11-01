@@ -151,7 +151,7 @@
   {#if !uploader.batches.length}
     <div class="tips">
       <p><strong>Pode fechar sem medo.</strong> Se a página recarregar ou a conexão cair, adicione os mesmos arquivos de novo: o envio continua de onde parou e o que já chegou é pulado.</p>
-      <p class="muted">No iPhone, o seletor abre a Fototeca. Para mandar a Fototeca inteira, use o “Esvaziar iPhone” no app do Mac.</p>
+      <p class="muted">No iPhone, o seletor abre a Fototeca. Para mandar a Fototeca inteira, use o “Esvaziar iPhone” no app do computador.</p>
     </div>
   {/if}
 </div>
