@@ -1,6 +1,7 @@
 # Builds the desktop app (Tauri, in mac/) for macOS and Windows.
 #
-# - Pull requests and manual runs: build both, keep the installers as run artifacts.
+# - Pushes to main and pull requests that touch the app, and manual runs: build both,
+#   keep the installers as run artifacts (30 days).
 # - A tag "app-vX.Y.Z" (same version as mac/src-tauri/tauri.conf.json): build both and
 #   publish them on the GitHub Releases page.
 #
@@ -11,7 +12,11 @@ name: App (Mac e Windows)
 
 on:
   push:
+    branches: [main]
     tags: ["app-v*"]
+    paths:
+      - "mac/**"
+      - ".github/workflows/app.yml"
   pull_request:
     paths:
       - "mac/**"

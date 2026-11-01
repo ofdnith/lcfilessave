@@ -43,8 +43,10 @@ O GitHub compila os dois sozinho (`.github/workflows/app.yml`):
 2. Crie e envie a tag com o mesmo número: `git tag app-v0.2.0 && git push origin app-v0.2.0`.
 3. Em uns 15 minutos o `.dmg` e o `-setup.exe` aparecem em **Releases**.
 
-Todo pull request que mexe em `mac/` também compila os dois; os instaladores ficam
-como artefatos da execução (aba **Actions**) por 30 dias.
+Toda mudança em `mac/` que entra na `main` (ou num pull request) também compila os
+dois; os instaladores ficam como artefatos da execução (aba **Actions** › a execução
+› **Artifacts**) por 30 dias. Para compilar sem mudar nada, use **Actions** ›
+**App (Mac e Windows)** › **Run workflow**.
 
 ## Como gerar o app no seu Mac (passo a passo)
 
