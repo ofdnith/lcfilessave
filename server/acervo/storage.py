@@ -26,6 +26,9 @@ from .config import (
 LAYOUT = (INBOX_DIR, LIBRARY_DIR, TRASH_DIR, THUMBS_DIR, TMP_DIR)
 EXTRA_DIRS = (PREVIEWS_DIR, GEO_DIR, f"{TMP_DIR}/uploads")
 CHUNK = 1024 * 1024
+# Suffix of half-written copies. Unusual on purpose: an original may well be
+# called "something.part", and must never be mistaken for a leftover.
+TEMP_SUFFIX = ".acervo-tmp"
 
 
 class DataDirBusy(RuntimeError):
@@ -131,7 +134,7 @@ def move_verified(src: Path, dest: Path, expected_sha: str) -> None:
     except OSError as exc:
         if exc.errno != 18:  # EXDEV: cross-device link
             raise
-    part = dest.with_name(dest.name + ".part")
+    part = dest.with_name(dest.name + TEMP_SUFFIX)
     with open(src, "rb") as fin, open(part, "wb") as fout:
         shutil.copyfileobj(fin, fout, CHUNK)
         fout.flush()

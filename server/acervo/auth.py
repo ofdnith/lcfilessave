@@ -76,9 +76,10 @@ def _token_hash(token: str) -> str:
 
 def create_token(conn: sqlite3.Connection, kind: str, label: str) -> str:
     token = secrets.token_urlsafe(32)
+    expires = {"session": iso_in(SESSION_DAYS), "migration": iso_in(1)}.get(kind)
     conn.execute(
         "INSERT INTO auth_tokens (token_hash, kind, label, expires_at) VALUES (?, ?, ?, ?)",
-        (_token_hash(token), kind, label[:80], iso_in(SESSION_DAYS) if kind == "session" else None),
+        (_token_hash(token), kind, label[:80], expires),
     )
     return token
 
@@ -143,10 +144,10 @@ def identify(request: Request) -> str | None:
     conn = db.connect(cfg.db_path)
     try:
         token = bearer(request)
-        if token and token_valid(conn, token):
+        if token and token_valid(conn, token) in ("api", "session"):
             return "token"
         cookie = request.cookies.get(COOKIE)
-        if cookie and token_valid(conn, cookie):
+        if cookie and token_valid(conn, cookie) in ("api", "session"):
             return "cookie"
         if (not password_set(conn) and is_loopback(client_addr(request)) and not _forwarded(request)
                 and _local_host(request)):
@@ -180,6 +181,8 @@ def is_remote(request: Request) -> bool:
         addr = ipaddress.ip_address(client_addr(request))
     except ValueError:
         return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:  # '::ffff:100.x.y.z'
+        addr = addr.ipv4_mapped
     return any(addr in ipaddress.ip_network(net) for net in cfg.remote_networks)
 
 
@@ -192,6 +195,22 @@ def forbid_remote(request: Request) -> None:
     if readonly(request):
         raise HTTPException(status_code=403, detail="Fora de casa o Acervo está em modo seguro: "
                                                       "apagar e mexer em HDs só pela rede de casa.")
+
+
+MIGRATION_TOKEN_HOURS = 24
+
+
+def require_migration_token(request: Request) -> None:
+    """Only a dedicated, short-lived migration token opens /api/migration/*."""
+    token = bearer(request)
+    conn = db.connect(request.app.state.config.db_path)
+    try:
+        ok = token is not None and token_valid(conn, token) == "migration"
+    finally:
+        conn.close()
+    if not ok:
+        raise HTTPException(status_code=401, detail="Use um token de migração (acervo-ctl token migracao); "
+                                                      "ele vale por 24 horas.")
 
 
 def require_auth(request: Request) -> str:

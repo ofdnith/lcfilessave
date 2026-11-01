@@ -37,6 +37,10 @@ class SubscribeBody(BaseModel):
 @router.post("/subscribe")
 def subscribe(body: SubscribeBody, request: Request) -> dict:
     topics = [t for t in body.topics if t in push.TOPICS]
+    try:
+        push.check_keys(body.subscription.keys.p256dh, body.subscription.keys.auth)
+    except push.BadSubscription as exc:
+        raise HTTPException(400, f"Inscrição de aviso inválida: {exc}") from None
     conn = db.connect(request.app.state.config.db_path)
     try:
         conn.execute(

@@ -110,10 +110,14 @@ def main(argv: list[str] | None = None) -> int:
         conn = db.connect(cfg.db_path)
         try:
             if args.token_cmd == "criar":
+                migration = args.nome.lower() in ("migracao", "migração")
                 with transaction(conn):
-                    token = auth.create_token(conn, "api", args.nome)
+                    token = auth.create_token(conn, "migration" if migration else "api", args.nome)
                 print(f"Token para '{args.nome}' (copie agora; ele não será mostrado de novo):\n\n{token}\n")
-                print("Nos Atalhos, use o cabeçalho:  Authorization: Bearer <token>")
+                if migration:
+                    print("Token de migração: serve só para `acervo migrar`, só pela rede de casa, e vale 24 horas.")
+                else:
+                    print("Nos Atalhos, use o cabeçalho:  Authorization: Bearer <token>")
             elif args.token_cmd == "listar":
                 for r in conn.execute("SELECT id, label, created_at, last_used_at, revoked_at FROM auth_tokens "
                                       "WHERE kind = 'api' ORDER BY id"):

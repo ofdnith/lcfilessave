@@ -60,7 +60,7 @@ sobra. Qualquer mini PC x86 ou ARM com 4 GB de RAM serve.
 No Termux do Realme:
 
 ```bash
-acervo-ctl token migracao     # copie o token que aparece
+acervo-ctl token migracao     # copie o token; ele vale 24 horas e só serve para isto
 acervo-ctl status             # anote a "impressão" do certificado
 ```
 
@@ -148,8 +148,10 @@ Lembre de devolver o nome `acervo` a ele no Tailscale.
 ## Por dentro (para quem quer entender)
 
 1. O mini PC pede ao Realme para **congelar**. A partir daí, qualquer pedido
-   que mudaria dados recebe "só para consulta" (HTTP 423), e as tarefas em
-   segundo plano param.
+   que mudaria dados recebe "só para consulta" (HTTP 423). O Realme **espera**
+   terminar o que já estava em andamento (um vídeo grande chegando, uma tarefa
+   em segundo plano) e cataloga arquivos soltos de alguma queda antiga, para
+   que nada fique para trás. Mesmo se ele reiniciar, continua congelado.
 2. O mini PC baixa uma **cópia consistente do catálogo**, feita com a API de
    backup do SQLite, e confere a integridade dela.
 3. Baixa o **manifesto**: todos os originais (com o SHA-256 do catálogo), as
@@ -159,7 +161,9 @@ Lembre de devolver o nome `acervo` a ele no Tailscale.
 5. O catálogo é ajustado para a nova máquina: o que estava no microSD do Realme
    passa a ser local, e o congelamento sai da cópia.
 6. Por fim, ele confere que todo original do catálogo existe com o tamanho
-   certo e escreve o `MIGRACAO.txt`.
+   certo, pergunta ao Realme se algo mudou desde a cópia do catálogo (se mudou,
+   a migração não é dada como completa) e escreve o `MIGRACAO.txt`.
+7. O token de migração é invalidado no servidor novo; no antigo, expira em 24 horas.
 
 O mesmo comando serve para qualquer mudança futura: mini PC → outro mini PC,
 ou → um Mac mini. O Linux é o caminho testado.

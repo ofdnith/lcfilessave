@@ -61,7 +61,11 @@ def test_keep_everything_except_suggestions(api, tmp_path):
     clean = [api.upload(make_jpeg(tmp_path / f"IMG_{i}.JPG", color=(i * 50, 10, 10), pattern=i + 1))["item_id"]
              for i in range(3)]
     wa = api.upload(make_jpeg(tmp_path / "IMG-20240101-WA0001.jpg", color=(1, 200, 1), pattern=9))["item_id"]
-    assert api.get("/api/inbox/summary").json() == {"total": 4, "flagged": 1, "clean": 3}
+    # Right after the backup nothing has been analysed yet: nothing is kept in one tap.
+    assert api.get("/api/inbox/summary").json() == {"total": 4, "flagged": 1, "processing": 3, "clean": 0}
+    assert api.post("/api/inbox/keep-clean").json() == {"kept": 0, "flagged_left": 4}
+    api.run_jobs()
+    assert api.get("/api/inbox/summary").json() == {"total": 4, "flagged": 1, "processing": 0, "clean": 3}
     res = api.post("/api/inbox/keep-clean").json()
     assert res == {"kept": 3, "flagged_left": 1}
     assert {api.item(i)["state"] for i in clean} == {"library"}
@@ -245,6 +249,17 @@ def test_full_mode_allows_everything_remotely(cfg, tmp_path):
 
 # --- migration -------------------------------------------------------------------------------------
 
+def migration_token(cfg) -> str:
+    from acervo import auth
+    from acervo.catalog import transaction
+    c = db.connect(cfg.db_path)
+    try:
+        with transaction(c):
+            return auth.create_token(c, "migration", "migracao")
+    finally:
+        c.close()
+
+
 def test_migration_to_a_new_server(tmp_path):
     from acervo import migrate
     from acervo.config import Config
@@ -263,7 +278,7 @@ def test_migration_to_a_new_server(tmp_path):
         from acervo.certs import generate
         generate(old_cfg.subdir("certificados"), ["192.168.0.50"])
 
-        source = migrate.Source("http://old", o.headers["Authorization"][7:], client=old)
+        source = migrate.Source("http://old", migration_token(old_cfg), client=old)
         report = migrate.run(new_cfg, source, progress=lambda m: None)
         assert report.failed == [] and report.originals == 4 and report.aux >= 8
 
@@ -315,7 +330,7 @@ def test_corrupted_file_on_the_old_server_is_reported(tmp_path):
         iid = o.upload(make_jpeg(tmp_path / "IMG_Z.JPG"))["item_id"]
         rel = q(old_cfg, "SELECT rel_path FROM files WHERE item_id = ?", iid)[0][0]
         (old_cfg.data_dir / rel).write_bytes(b"bit rot")
-        report = migrate.run(new_cfg, migrate.Source("http://old", o.headers["Authorization"][7:], client=old),
+        report = migrate.run(new_cfg, migrate.Source("http://old", migration_token(old_cfg), client=old),
                              progress=lambda m: None)
     assert report.failed and "IMG_Z" in report.failed[0]
     assert (new_cfg.data_dir / ".migracao.json").exists()  # not declared complete
@@ -326,7 +341,7 @@ def test_cancel_unfreezes_the_old_server(cfg):
     from acervo import migrate
     with TestClient(create_app(cfg)) as c:
         a = Api(c, cfg, login(c, cfg))
-        src = migrate.Source("http://x", a.headers["Authorization"][7:], client=c)
+        src = migrate.Source("http://x", migration_token(cfg), client=c)
         src.json("POST", "/api/migration/start")
         assert a.post("/api/albums", json={"name": "x"}).status_code == 423
         migrate.cancel(src)

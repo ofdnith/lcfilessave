@@ -4,20 +4,23 @@
 #   acervo-ctl senha | token NOME | cidades | verificar | atualizar
 set -uo pipefail
 
-REPO="$(dirname "$(dirname "$(readlink -f "$(command -v acervo-ctl)")")")"
-[[ -f "$REPO/acervo.toml" ]] || REPO="$HOME/acervo"
+REPO_INSTALLED=""   # filled in by instalar.sh
+REPO="${REPO_INSTALLED:-$HOME/acervo}"
 CONF="$REPO/acervo.toml"
 ACERVO="$REPO/server/.venv/bin/acervo --config $CONF"
+HEALTH="$(mktemp)"
+trap 'rm -f "$HEALTH"' EXIT
 
 case "${1:-status}" in
   start|stop|restart) sudo systemctl "$1" acervo && echo "acervo: $1 ok" ;;
   status)
     systemctl is-active --quiet acervo && echo "Serviço: rodando" || echo "Serviço: parado"
-    if curl -ksf https://127.0.0.1:8765/api/health -o /tmp/acervo-health.json 2>/dev/null \
-       || curl -sf http://127.0.0.1:8765/api/health -o /tmp/acervo-health.json 2>/dev/null; then
-      python3 - <<'EOF'
+    if curl -ksf https://127.0.0.1:8765/api/health -o $HEALTH 2>/dev/null \
+       || curl -sf http://127.0.0.1:8765/api/health -o $HEALTH 2>/dev/null; then
+      python3 - "$HEALTH" <<'EOF'
 import json
-h = json.load(open("/tmp/acervo-health.json"))
+import sys
+h = json.load(open(sys.argv[1]))
 s = h["storage"]
 print(f"Servidor: {'OK' if h['status'] == 'ok' else 'COM PROBLEMA'} · versão {h['version']}")
 print(f"Disco: {s['free_bytes']/1e9:.1f} GB livres de {s['total_bytes']/1e9:.0f} GB ({s['used_pct']}% usado)")
@@ -34,7 +37,7 @@ EOF
     ;;
   logs) journalctl -u acervo -n 80 -f ;;
   senha) $ACERVO senha && sudo systemctl restart acervo ;;
-  token) $ACERVO token criar "${2:-iPhone}" ;;
+  token) $ACERVO token criar "${2:-iPhone}" ;;   # "migracao" = token de migração (24 h)
   cidades) $ACERVO baixar-cidades ;;
   verificar) sudo systemctl stop acervo; $ACERVO verificar; sudo systemctl start acervo ;;
   atualizar) cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/linux/instalar.sh" --atualizar ;;

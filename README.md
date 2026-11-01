@@ -71,11 +71,6 @@ Sem senha definida, o servidor só aceita este computador.
 
 ### Testes
 
-```bash
-scripts/test.sh            # servidor: 163 testes
-cd web && npm run check    # interface: verificação de tipos
-cd mac/src-tauri && cargo test
-```
 
 Os testes do servidor incluem os cinco obrigatórios da especificação (mesmo
 arquivo com nome diferente; mesmo nome com conteúdo diferente; arquivo já

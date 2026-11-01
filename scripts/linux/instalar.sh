@@ -72,14 +72,21 @@ say "3/8 Servidor e interface"
 ok "instalado"
 
 say "4/8 Onde guardar os dados"
-DEFAULT_DATA="$HOME/acervo-dados"
-read -r -p "  Pasta dos dados [$DEFAULT_DATA]: " DATA
-DATA="${DATA:-$DEFAULT_DATA}"
+if [[ -f "$CONF" ]]; then
+  # Existing installation: the data folder is whatever acervo.toml says, never a new guess.
+  DATA="$("$VENV/bin/acervo" --config "$CONF" config | awk -F': +' '/^pasta de dados/ {print $2}')"
+  [[ -n "$DATA" ]] || die "Não consegui ler data_dir de $CONF."
+else
+  DEFAULT_DATA="$HOME/acervo-dados"
+  read -r -p "  Pasta dos dados [$DEFAULT_DATA]: " DATA
+  DATA="${DATA:-$DEFAULT_DATA}"
+fi
 mkdir -p "$DATA"
 ok "$DATA ($(df -h "$DATA" | awk 'NR==2 {print $4}') livres)"
 
 say "5/8 Rede"
-IP="$(hostname -I | awk '{print $1}')"
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[[ -n "$IP" ]] || read -r -p "  Não achei o IP deste mini PC. Digite (ex.: 192.168.0.60): " IP
 ok "IP local: $IP (reserve este IP no roteador)"
 if ! command -v tailscale >/dev/null; then
   if ask "Instalar o Tailscale (acesso de fora de casa, sem abrir portas)?"; then
@@ -98,6 +105,7 @@ if command -v tailscale >/dev/null; then
 fi
 
 if [[ ! -f "$CONF" ]]; then
+  read -r -p "  Seu e-mail (só vai junto dos avisos para o serviço da Apple; Enter para pular): " EMAIL
   {
     echo "# Gerado pelo scripts/linux/instalar.sh em $(date '+%d/%m/%Y'). Comentários: acervo.example.toml"
     echo "data_dir = \"$DATA\""
@@ -110,6 +118,7 @@ if [[ ! -f "$CONF" ]]; then
     echo "archive_batch_gb = 80"
     echo "archive_copies = 1"
     echo "remote_mode = \"seguro\""
+    if [[ -n "${EMAIL:-}" ]]; then echo "push_contact = \"mailto:$EMAIL\""; fi
   } > "$CONF"
   ok "criado $CONF"
 else
@@ -128,6 +137,8 @@ if [[ "$MODE" == "2" ]]; then
   done
 else
   say "6/8 Senha"
+  # An update changes the catalog schema: never under a running server.
+  systemctl is-active --quiet acervo 2>/dev/null && sudo systemctl stop acervo
   $ACERVO migrate >/dev/null
   if $VENV/bin/python - "$DATA/catalogo.db" <<'EOF'
 import sqlite3, sys
@@ -148,7 +159,7 @@ Wants=network-online.target
 
 [Service]
 User=$ME
-ExecStart=$VENV/bin/acervo --config $CONF serve
+ExecStart="$VENV/bin/acervo" --config "$CONF" serve
 Restart=always
 RestartSec=5
 Nice=5
@@ -159,7 +170,8 @@ TimeoutStopSec=60
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
-sudo systemctl enable --now acervo >/dev/null
+sudo systemctl enable acervo >/dev/null
+sudo systemctl restart acervo   # loads new code, schema and certificate (also on updates)
 if command -v ufw >/dev/null && sudo ufw status | grep -q "Status: active"; then
   sudo ufw allow from 10.0.0.0/8 to any port 8765 proto tcp >/dev/null
   sudo ufw allow from 172.16.0.0/12 to any port 8765 proto tcp >/dev/null
@@ -167,7 +179,9 @@ if command -v ufw >/dev/null && sudo ufw status | grep -q "Status: active"; then
   sudo ufw allow in on tailscale0 to any port 8765 proto tcp >/dev/null
   ok "firewall: porta 8765 só para a rede de casa e o Tailscale"
 fi
-sudo install -m 755 "$REPO/scripts/linux/acervo-ctl" /usr/local/bin/acervo-ctl
+sed "s|^REPO_INSTALLED=.*|REPO_INSTALLED=\"$REPO\"|" "$REPO/scripts/linux/acervo-ctl" \
+  | sudo tee /usr/local/bin/acervo-ctl >/dev/null
+sudo chmod 755 /usr/local/bin/acervo-ctl
 ok "serviço acervo ativo (sobe sozinho quando o mini PC liga)"
 
 say "8/8 Conferindo"

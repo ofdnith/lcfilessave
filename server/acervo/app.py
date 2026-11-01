@@ -44,8 +44,12 @@ def create_app(cfg: Config) -> FastAPI:
     async def lifespan(app: FastAPI):
         lock = lock_data_dir(cfg)
         prepare(cfg)
-        report = reconcile(cfg, ingestor)
-        report["uploads_recovered"] = recover_uploads(cfg, ingestor)
+        if migration.migration_state(cfg)["active"]:
+            # Frozen for a migration: restarting must not change files or catalog.
+            report = {"missing": 0, "frozen": True}
+        else:
+            report = reconcile(cfg, ingestor)
+            report["uploads_recovered"] = recover_uploads(cfg, ingestor)
         app.state.reconcile_report = report
         if cfg.workers:
             worker.start()
@@ -71,19 +75,29 @@ def create_app(cfg: Config) -> FastAPI:
         app.include_router(router)
 
     app.state.migration_active = None  # unknown until first checked
+    app.state.inflight_writes = 0
 
     @app.middleware("http")
     async def migration_guard(request: Request, call_next):
-        """While migrating to a new server, this one is read-only (consistent copy)."""
+        """While migrating to a new server this one is read-only, and requests that
+        were already writing when the freeze started are waited for (see
+        api/migration.start). Check and count happen without an await in between,
+        so a request either sees the freeze or is counted before it starts."""
         path = request.url.path
-        if (request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/")
-                and not path.startswith(("/api/auth/", "/api/migration/"))):
-            if app.state.migration_active is None:
-                app.state.migration_active = migration.migration_state(cfg)["active"]
-            if app.state.migration_active:
-                return JSONResponse({"detail": "Migração em andamento: este servidor está só para consulta."},
-                                    status_code=423)
-        return await call_next(request)
+        writes = (request.method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api/")
+                  and not path.startswith("/api/migration/") and path not in ("/api/auth/login", "/api/auth/logout"))
+        if not writes:
+            return await call_next(request)
+        if app.state.migration_active is None:
+            app.state.migration_active = migration.migration_state(cfg)["active"]
+        if app.state.migration_active:
+            return JSONResponse({"detail": "Migração em andamento: este servidor está só para consulta."},
+                                status_code=423)
+        app.state.inflight_writes += 1
+        try:
+            return await call_next(request)
+        finally:
+            app.state.inflight_writes -= 1
 
     @app.get("/ca.crt", include_in_schema=False)
     def ca_cert() -> FileResponse:

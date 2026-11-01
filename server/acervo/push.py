@@ -72,9 +72,14 @@ def _vapid_key(cfg: Config):
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             key = ec.generate_private_key(ec.SECP256R1())
-            path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                               serialization.NoEncryption()))
-            os.chmod(path, 0o600)
+            tmp = path.with_name(path.name + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # private from the first byte
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
         return serialization.load_pem_private_key(path.read_bytes(), password=None)
 
 
@@ -99,7 +104,31 @@ def _vapid_header(cfg: Config, endpoint: str) -> str:
 
 # --- RFC 8291 encryption -------------------------------------------------------------------------
 
+class BadSubscription(ValueError):
+    pass
+
+
+def check_keys(p256dh: str, auth_secret: str) -> None:
+    """A browser's keys: an uncompressed P-256 point (65 bytes, 0x04…) and a 16-byte secret."""
+    try:
+        point, auth = _unb64u(p256dh), _unb64u(auth_secret)
+    except (ValueError, TypeError):
+        raise BadSubscription("chaves em formato inválido") from None
+    if len(point) != 65 or point[0] != 4 or len(auth) != 16:
+        raise BadSubscription("chaves com tamanho inválido")
+    _, _, ec, *_ = _crypto()
+    try:
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), point)
+    except ValueError:
+        raise BadSubscription("chave pública inválida") from None
+
+
+MAX_PAYLOAD = 3000  # one record of 4096 bytes minus encryption overhead, with margin
+
+
 def encrypt(payload: bytes, p256dh: str, auth_secret: str) -> bytes:
+    if len(payload) > MAX_PAYLOAD:
+        raise ValueError("mensagem grande demais para um aviso")
     hashes, serialization, ec, _, AESGCM, HKDF = _crypto()
     ua_public = _unb64u(p256dh)
     auth = _unb64u(auth_secret)
@@ -117,9 +146,22 @@ def encrypt(payload: bytes, p256dh: str, auth_secret: str) -> bytes:
 
 # --- sending ------------------------------------------------------------------------------------
 
+def _fit(message: dict) -> bytes:
+    data = json.dumps(message, ensure_ascii=False).encode()
+    if len(data) > MAX_PAYLOAD:
+        message = {**message, "body": message.get("body", "")[:500] + "…"}
+        data = json.dumps(message, ensure_ascii=False).encode()
+    return data
+
+
 def send_one(cfg: Config, sub: dict, message: dict) -> int:
-    """POST one notification. Returns the HTTP status (201 = accepted)."""
-    body = encrypt(json.dumps(message, ensure_ascii=False).encode(), sub["p256dh"], sub["auth"])
+    """POST one notification. Returns the HTTP status (201 = accepted, 0 = could not send)."""
+    try:
+        body = encrypt(_fit(message), sub["p256dh"], sub["auth"])
+    except (ValueError, TypeError) as exc:
+        log.info("Inscrição de aviso com chaves inválidas: %s", exc)
+        return 410  # treated like a subscription the browser dropped
+
     req = urllib.request.Request(sub["endpoint"], data=body, method="POST", headers={
         "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
         "TTL": "86400", "Urgency": "normal", "Authorization": _vapid_header(cfg, sub["endpoint"])})
@@ -145,7 +187,11 @@ def deliver(cfg: Config, topic: str, title: str, body: str, url: str = "/") -> i
     for sub in subs:
         if topic != "teste" and topic not in json.loads(sub["topics"]):
             continue
-        status = send_one(cfg, sub, {"title": title, "body": body, "url": url, "topic": topic})
+        try:
+            status = send_one(cfg, sub, {"title": title, "body": body, "url": url, "topic": topic})
+        except Exception:  # one broken subscription must not stop the others
+            log.exception("Falha ao enviar aviso")
+            status = 0
         conn = db.connect(cfg.db_path)
         try:
             if 200 <= status < 300:

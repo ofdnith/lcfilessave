@@ -97,7 +97,7 @@ class Seen(BaseModel):
     used_bytes: int | None = Field(None, ge=0)
 
 
-@router.post("/volumes/{volume_id}/seen")
+@router.post("/volumes/{volume_id}/seen", dependencies=[Depends(auth.forbid_remote)])
 def volume_seen(volume_id: str, body: Seen, request: Request) -> dict:
     conn = _conn(request)
     try:
