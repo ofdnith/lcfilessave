@@ -33,9 +33,7 @@ pub fn io_pt(e: &io::Error) -> String {
     use io::ErrorKind as K;
     let msg = match e.kind() {
         K::NotFound => "não encontrado",
-        K::PermissionDenied => {
-            "sem permissão (libere o Acervo em Ajustes do Sistema › Privacidade e Segurança)"
-        }
+        K::PermissionDenied => PERMISSION_HINT,
         K::AlreadyExists => "já existe",
         K::StorageFull => "disco cheio",
         K::ReadOnlyFilesystem => "disco só para leitura",
@@ -45,13 +43,45 @@ pub fn io_pt(e: &io::Error) -> String {
         K::Interrupted | K::TimedOut => "operação interrompida",
         K::InvalidInput | K::InvalidData | K::InvalidFilename => "nome ou dado inválido",
         K::ResourceBusy => "em uso por outro programa",
-        _ => match e.raw_os_error() {
-            Some(libc::EIO) => "erro de leitura/gravação no disco (cabo ou disco com defeito?)",
-            Some(libc::ENXIO) | Some(libc::ENODEV) => "o disco foi desconectado",
-            _ => return format!("erro do sistema ({e})"),
+        _ => match os_error_pt(e.raw_os_error()) {
+            Some(m) => m,
+            None => return format!("erro do sistema ({e})"),
         },
     };
     msg.to_string()
+}
+
+#[cfg(windows)]
+const PERMISSION_HINT: &str = "sem permissão (o disco está protegido contra gravação ou em uso por outro programa)";
+#[cfg(not(windows))]
+const PERMISSION_HINT: &str =
+    "sem permissão (libere o Acervo em Ajustes do Sistema › Privacidade e Segurança)";
+
+#[cfg(not(windows))]
+fn os_error_pt(code: Option<i32>) -> Option<&'static str> {
+    match code {
+        Some(libc::EIO) => Some("erro de leitura/gravação no disco (cabo ou disco com defeito?)"),
+        Some(libc::ENXIO) | Some(libc::ENODEV) => Some("o disco foi desconectado"),
+        _ => None,
+    }
+}
+
+/// Win32 error codes (raw_os_error on Windows is GetLastError, not errno).
+#[cfg(windows)]
+fn os_error_pt(code: Option<i32>) -> Option<&'static str> {
+    match code {
+        // ERROR_CRC, ERROR_SEEK, ERROR_WRITE_FAULT, ERROR_READ_FAULT, ERROR_GEN_FAILURE, ERROR_IO_DEVICE
+        Some(23 | 25 | 29 | 30 | 31 | 1117) => {
+            Some("erro de leitura/gravação no disco (cabo ou disco com defeito?)")
+        }
+        // ERROR_NOT_READY, ERROR_DEV_NOT_EXIST, ERROR_DEVICE_NOT_CONNECTED, ERROR_NO_SUCH_DEVICE
+        Some(21 | 55 | 1167 | 433) => Some("o disco foi desconectado"),
+        // ERROR_WRITE_PROTECT
+        Some(19) => Some("disco protegido contra gravação"),
+        // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+        Some(32 | 33) => Some("em uso por outro programa"),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +116,28 @@ pub fn safe_join(mount: &Path, rel_path: &str) -> Result<PathBuf, String> {
     if rel_path.ends_with(".part") || rel_path.ends_with(".tmp") {
         return Err(bad());
     }
+    #[cfg(windows)]
+    if rel_path.split('/').any(windows_unsafe_segment) {
+        return Err(bad());
+    }
     Ok(mount.join(p))
+}
+
+/// Names Windows would reinterpret: `a:b` writes an alternate data stream, a trailing dot or
+/// space is silently dropped, and CON/NUL/COM1… are devices. exFAT refuses `<>:"|?*` anyway.
+#[cfg(windows)]
+fn windows_unsafe_segment(seg: &str) -> bool {
+    if seg.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+        || seg.ends_with('.')
+        || seg.ends_with(' ')
+    {
+        return true;
+    }
+    let stem = seg.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit())
 }
 
 /// Paths for originals must not land inside `.acervo/` (reserved for the

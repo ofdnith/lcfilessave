@@ -3,7 +3,21 @@
   import { duration } from '../lib/format';
   import type { Item } from '../lib/types';
 
-  let { item, selected = false, selecting = false }: { item: Item; selected?: boolean; selecting?: boolean } = $props();
+  let {
+    item,
+    selected = false,
+    selecting = false,
+    fit = 'crop',
+    onratio,
+  }: {
+    item: Item;
+    selected?: boolean;
+    selecting?: boolean;
+    /** crop = square tile (fills it); full = whole picture, the parent sets the shape. */
+    fit?: 'crop' | 'full';
+    /** Real width/height of the thumbnail, for layouts that size tiles by shape. */
+    onratio?: (ratio: number) => void;
+  } = $props();
 
   const kindIcon: Record<Item['kind'], IconName> = {
     photo: 'photo',
@@ -16,9 +30,19 @@
   const ext = $derived((item.original_name.split('.').pop() ?? '').slice(0, 5).toUpperCase());
 </script>
 
-<div class="thumb" class:selected class:selecting data-kind={item.kind}>
+<div class="thumb" class:selected class:selecting class:full={fit === 'full'} data-kind={item.kind}>
   {#if item.thumb_url && !failed}
-    <img src={item.thumb_url} alt={item.original_name} loading="lazy" decoding="async" onerror={() => (failed = true)} />
+    <img
+      src={item.thumb_url}
+      alt={item.original_name}
+      loading="lazy"
+      decoding="async"
+      onerror={() => (failed = true)}
+      onload={(e) => {
+        const im = e.currentTarget as HTMLImageElement;
+        if (onratio && im.naturalWidth && im.naturalHeight) onratio(im.naturalWidth / im.naturalHeight);
+      }}
+    />
   {:else}
     <div class="ph">
       <Icon name={kindIcon[item.kind]} size={26} />
@@ -57,6 +81,15 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  /* Whole picture: the tile already has the photo's shape; contain is a safety net
+     for the moment before the real shape is known. */
+  .thumb.full {
+    aspect-ratio: auto;
+    height: 100%;
+  }
+  .full img {
+    object-fit: contain;
   }
   .ph {
     width: 100%;

@@ -45,7 +45,7 @@ class Config:
     port: int = DEFAULT_PORT
     server_name: str = "Acervo"
     storage_alert_pct: int = 80
-    archive_batch_gb: int = 80
+    archive_batch_gb: int = 5
     archive_copies: int = 1
     trash_days: int = 30
     https: bool = False

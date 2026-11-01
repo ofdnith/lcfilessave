@@ -113,7 +113,7 @@ if [[ ! -f "$CONF" ]]; then
     echo "inbox_alert_gb = 5"
     echo "max_temp_c = 40"
     echo "storage_alert_pct = 80"
-    echo "archive_batch_gb = 80"
+    echo "archive_batch_gb = 5"
     echo "archive_copies = 1"
     if [[ -n "${EMAIL:-}" ]]; then echo "push_contact = \"mailto:$EMAIL\""; fi
   } > "$CONF"

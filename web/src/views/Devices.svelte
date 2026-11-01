@@ -108,7 +108,7 @@
             </div>
           {:else}
             <p class="warn small">
-              Precisa estar em exFAT para abrir em qualquer computador. Formate pelo Utilitário de Disco (isso apaga o HD) e conecte de novo.
+              Precisa estar em exFAT para abrir em qualquer computador. Formate em exFAT (no Mac pelo Utilitário de Disco; no Windows, botão direito no disco › Formatar). Isso apaga o HD; depois conecte de novo.
             </p>
           {/if}
         {/if}

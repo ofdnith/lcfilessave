@@ -20,6 +20,7 @@
   import { ItemList } from '../lib/itemlist.svelte';
   import { app } from '../lib/state.svelte';
   import { openViewer } from '../lib/viewer.svelte';
+  import { prefs, toggleFit } from '../lib/prefs.svelte';
   import type { ItemQuery } from '../lib/api';
   import type { Action } from '../lib/types';
 
@@ -161,12 +162,25 @@
 
   <div class="filters">
     <SearchBar showArchived={false} placeholder="Buscar na Entrada" />
-    <KindTabs value={app.kind} tabs={app.stats?.inbox_tabs ?? null} onchange={(k) => (app.kind = k)} />
+    <div class="tabs-row">
+      <KindTabs value={app.kind} tabs={app.stats?.inbox_tabs ?? null} onchange={(k) => (app.kind = k)} />
+      {#if layout === 'grid'}
+        <button
+          class="btn small ghost fit-btn"
+          onclick={() => toggleFit('inbox')}
+          aria-label={prefs.inboxFit === 'full' ? 'Ver em quadrados' : 'Ver fotos inteiras'}
+          title={prefs.inboxFit === 'full' ? 'Ver em quadrados' : 'Ver fotos inteiras'}
+        >
+          <Icon name={prefs.inboxFit === 'full' ? 'grid' : 'rows'} size={16} />
+        </button>
+      {/if}
+    </div>
   </div>
 
   <ItemBrowser
     {list}
     {layout}
+    fit={prefs.inboxFit}
     {selection}
     {selecting}
     onselectstart={() => (selecting = true)}
@@ -253,6 +267,18 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  .tabs-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tabs-row > :global(:first-child) {
+    flex: 1;
+    min-width: 0;
+  }
+  .fit-btn {
+    flex: none;
   }
   .center {
     text-align: center;

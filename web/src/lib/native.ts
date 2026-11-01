@@ -19,7 +19,7 @@ declare global {
 export const isNative = (): boolean => typeof window !== 'undefined' && !!window.__TAURI__;
 
 function tauri(): TauriGlobal {
-  if (!window.__TAURI__) throw new Error('Disponível só no app do Mac.');
+  if (!window.__TAURI__) throw new Error('Disponível só no app do computador (Mac ou Windows).');
   return window.__TAURI__;
 }
 

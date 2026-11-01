@@ -19,6 +19,12 @@ pub const VOLUME_FORMAT: u32 = 1;
 /// The only filesystem accepted for new volumes (spec: "Formato: exFAT").
 pub const REQUIRED_FS: &str = "exfat";
 
+#[cfg(windows)]
+const FORMAT_HINT: &str = "no Explorador de Arquivos, clique com o botão direito no disco › Formatar › \
+                           Sistema de arquivos \"exFAT\"";
+#[cfg(not(windows))]
+const FORMAT_HINT: &str = "formate pelo Utilitário de Disco escolhendo \"ExFAT\"";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VolumeJson {
     pub id: String,
@@ -81,6 +87,7 @@ pub fn read_volume_json(mount: &Path) -> Result<Option<VolumeJson>, String> {
 }
 
 /// Builds a `Disk` from already-collected filesystem facts.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn build_disk(
     mount: &Path,
     filesystem: &str,
@@ -92,6 +99,19 @@ pub fn build_disk(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| mount.display().to_string());
+    build_disk_labeled(mount, &label, filesystem, total_bytes, free_bytes, read_only)
+}
+
+/// Same as `build_disk`, with the name to show (Windows mounts are drive letters).
+pub fn build_disk_labeled(
+    mount: &Path,
+    label: &str,
+    filesystem: &str,
+    total_bytes: u64,
+    free_bytes: u64,
+    read_only: bool,
+) -> Disk {
+    let label = label.to_string();
     let (volume, volume_error) = match read_volume_json(mount) {
         Ok(Some(v)) => (
             Some(VolumeRef {
@@ -134,12 +154,13 @@ pub fn init_volume_at(
     if !filesystem.eq_ignore_ascii_case(REQUIRED_FS) {
         return Err(format!(
             "Este disco está formatado como {}. O Acervo só usa HDs em exFAT \
-             (formate pelo Utilitário de Disco escolhendo \"ExFAT\").",
+             ({}).",
             if filesystem.is_empty() {
                 "desconhecido"
             } else {
                 filesystem
-            }
+            },
+            FORMAT_HINT
         ));
     }
     if !valid_volume_id(id) {
@@ -210,11 +231,34 @@ pub fn list_disks() -> Vec<Disk> {
 
 /// Returns the plugged disk whose mount point is exactly `mount_path`.
 /// Commands that write use this so a page can never make us write elsewhere.
+#[cfg(not(windows))]
 pub fn find_disk(mount_path: &str) -> Option<Disk> {
-    let wanted = Path::new(mount_path.trim_end_matches('/'));
+    let wanted = normalize_mount(mount_path);
     list_disks()
         .into_iter()
-        .find(|d| Path::new(&d.mount_path) == wanted)
+        .find(|d| normalize_mount(&d.mount_path) == wanted)
+}
+
+/// Windows: called once per copied file, so only the requested drive letter is asked
+/// (asking every drive would wake sleeping disks and slow each copy).
+#[cfg(windows)]
+pub fn find_disk(mount_path: &str) -> Option<Disk> {
+    let wanted = normalize_mount(mount_path);
+    let b = wanted.as_bytes();
+    if b.len() != 2 || !b[0].is_ascii_uppercase() || b[1] != b':' {
+        return None;
+    }
+    platform::probe(b[0] as char)
+}
+
+#[cfg(windows)]
+fn normalize_mount(p: &str) -> String {
+    // "E:\\", "E:" and "e:/" are the same drive.
+    p.trim_end_matches(['\\', '/']).to_ascii_uppercase()
+}
+#[cfg(not(windows))]
+fn normalize_mount(p: &str) -> String {
+    p.trim_end_matches('/').to_string()
 }
 
 #[cfg(target_os = "macos")]
@@ -281,7 +325,121 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+mod platform {
+    //! Windows: every drive letter that is a removable or non-system fixed disk
+    //! (USB HDs usually report as "fixed"). Network, optical and RAM drives are skipped,
+    //! and so is the drive Windows runs from.
+    use super::{build_disk_labeled, Disk};
+    use std::path::Path;
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW};
+    use windows_sys::Win32::System::Diagnostics::Debug::{SetThreadErrorMode, SEM_FAILCRITICALERRORS};
+
+    const DRIVE_REMOVABLE: u32 = 2;
+    const DRIVE_FIXED: u32 = 3;
+    const FILE_READ_ONLY_VOLUME: u32 = 0x0008_0000;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn from_wide(buf: &[u16]) -> String {
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        String::from_utf16_lossy(&buf[..end])
+    }
+
+    fn system_drive() -> String {
+        std::env::var("SystemDrive")
+            .unwrap_or_else(|_| "C:".into())
+            .trim_end_matches('\\')
+            .to_ascii_uppercase()
+    }
+
+    pub fn list() -> Vec<Disk> {
+        // An empty card reader must not pop up "insert a disk" dialogs while we poll.
+        let mut old = 0u32;
+        // SAFETY: plain Win32 call with a valid out pointer.
+        unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut old) };
+        // SAFETY: no arguments.
+        let mask = unsafe { GetLogicalDrives() };
+        let mut out = Vec::new();
+        for i in 0..26u32 {
+            if mask & (1 << i) != 0 {
+                if let Some(d) = check((b'A' + i as u8) as char) {
+                    out.push(d);
+                }
+            }
+        }
+        // SAFETY: restores the previous mode.
+        unsafe { SetThreadErrorMode(old, std::ptr::null_mut()) };
+        out
+    }
+
+    /// One drive letter, with the same rules as `list`.
+    pub fn probe(letter: char) -> Option<Disk> {
+        let mut old = 0u32;
+        // SAFETY: plain Win32 call with a valid out pointer.
+        unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut old) };
+        let d = check(letter);
+        // SAFETY: restores the previous mode.
+        unsafe { SetThreadErrorMode(old, std::ptr::null_mut()) };
+        d
+    }
+
+    fn check(letter: char) -> Option<Disk> {
+        if format!("{letter}:") == system_drive() {
+            return None;
+        }
+        let root = format!("{letter}:\\");
+        let root_w = wide(&root);
+        // SAFETY: NUL-terminated UTF-16 path.
+        let kind = unsafe { GetDriveTypeW(root_w.as_ptr()) };
+        if kind != DRIVE_REMOVABLE && kind != DRIVE_FIXED {
+            return None;
+        }
+        stat(&root, &root_w)
+    }
+
+    fn stat(root: &str, root_w: &[u16]) -> Option<Disk> {
+        let mut label = [0u16; 261];
+        let mut fs = [0u16; 261];
+        let mut flags = 0u32;
+        // SAFETY: buffers and lengths match; unused out pointers are null.
+        let ok = unsafe {
+            GetVolumeInformationW(
+                root_w.as_ptr(),
+                label.as_mut_ptr(),
+                label.len() as u32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut flags,
+                fs.as_mut_ptr(),
+                fs.len() as u32,
+            )
+        };
+        if ok == 0 {
+            return None; // no media (empty card reader) or unreadable
+        }
+        let (total, free) = super::win_space(root_w)?;
+        let letter = &root[..2];
+        let name = from_wide(&label);
+        let shown = if name.trim().is_empty() {
+            format!("Disco ({letter})")
+        } else {
+            format!("{} ({letter})", name.trim())
+        };
+        Some(build_disk_labeled(
+            Path::new(root),
+            &shown,
+            &from_wide(&fs),
+            total,
+            free,
+            flags & FILE_READ_ONLY_VOLUME != 0,
+        ))
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 mod platform {
     //! Development fallback (Linux): removable disks under /media, /run/media
     //! and /mnt, read from /proc/self/mounts. Extra prefixes can be given in
@@ -398,7 +556,26 @@ mod platform {
     }
 }
 
+/// (total, free-for-us) bytes of the volume holding `path_w` (NUL-terminated UTF-16).
+#[cfg(windows)]
+fn win_space(path_w: &[u16]) -> Option<(u64, u64)> {
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
+    // SAFETY: valid NUL-terminated path and out pointers.
+    let ok = unsafe { GetDiskFreeSpaceExW(path_w.as_ptr(), &mut avail, &mut total, &mut free) };
+    (ok != 0).then_some((total, avail))
+}
+
 /// Free bytes available to us on the filesystem holding `path`.
+#[cfg(windows)]
+pub fn free_bytes(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let w: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    win_space(&w).map(|(_, free)| free)
+}
+
+/// Free bytes available to us on the filesystem holding `path`.
+#[cfg(not(windows))]
 pub fn free_bytes(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;

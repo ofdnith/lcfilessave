@@ -17,7 +17,7 @@ recebe, organiza e guarda temporariamente; HDs externos são o arquivo definitiv
   1. iPhone ou Mac envia o arquivo para o servidor (manual ou backup diário automático).
   2. O arquivo cai na **Entrada** e espera triagem.
   3. Aprovado, vai para o **Acervo**, organizado por data e tipo, com busca.
-  4. Quando o servidor encher (~80 GB), um lote é transferido pelo Mac para um HD
+  4. Quando o servidor juntar 5 GB (`archive_batch_gb`; era ~80 GB até 31/10/2026), um lote é transferido pelo Mac para um HD
      numerado (VOLUME-001, 002…), com verificação por hash.
   5. O servidor apaga o lote, mas mantém miniatura + metadados no catálogo: o
      acervo inteiro continua navegável e buscável, com o selo do volume onde está
@@ -195,7 +195,7 @@ Desenvolver e testar primeiro no MacBook; só depois instalar no Realme.
 |---|---|---|
 | Processador | Snapdragon 680, 8 núcleos ARM64 | Trabalho pesado em fila, com baixa prioridade |
 | Memória | 6 ou 8 GB de RAM | Sem Docker, PostgreSQL, Redis; processar em streaming |
-| Armazenamento | 128 GB UFS 2.2 (~100 GB livres) + microSD | Memória interna só para a Entrada (limite `inbox_max_gb`); o que passa pela triagem vai para o microSD (`sd_for_library`) e do cartão para o HD; alerta em 80% |
+| Armazenamento | 128 GB UFS 2.2 (~100 GB livres) + microSD | Memória interna só para a Entrada (limite `inbox_max_gb`); o que passa pela triagem vai para o microSD (`sd_for_library`) e do cartão para o HD; alerta em 80%; lote de arquivamento 5 GB (ajustável) |
 | Temperatura | Celular sempre na tomada; OCR e miniaturas esquentam | Tarefas pausam com a bateria a `max_temp_c` (40 °C) e voltam 3 °C abaixo; OCR sobre cópia de 1600 px, um núcleo |
 | Rede | Wi-Fi 5; USB-C 2.0 | Upload principal pelo Wi-Fi 5 GHz |
 | Sistema | Android 14, Realme UI 5, sem atualizações de segurança | Nunca expor portas; só LAN + Tailscale |

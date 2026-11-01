@@ -1,7 +1,7 @@
 <script lang="ts">
   // Month-grouped grid (media) or list (documents & co.), with infinite scroll and optional selection.
   import type { Snippet } from 'svelte';
-  import type { SvelteSet } from 'svelte/reactivity';
+  import { SvelteMap, type SvelteSet } from 'svelte/reactivity';
   import Thumb from './Thumb.svelte';
   import Icon, { type IconName } from './Icon.svelte';
   import { bytes, captureDate, monthKey, monthLabel, plural } from '../lib/format';
@@ -11,6 +11,7 @@
   let {
     list,
     layout,
+    fit = 'crop',
     selection = null,
     selecting = false,
     onopen,
@@ -21,6 +22,8 @@
   }: {
     list: ItemList;
     layout: 'grid' | 'list';
+    /** Grid only: crop = square tiles; full = rows of whole pictures (nothing cut off). */
+    fit?: 'crop' | 'full';
     selection?: SvelteSet<number> | null;
     selecting?: boolean;
     onopen: (index: number) => void;
@@ -49,6 +52,18 @@
     });
     return out;
   });
+
+  // Shape of each tile in "full" mode: catalog width/height first, then the real
+  // thumbnail shape once it loads (rotated videos and odd metadata get fixed here).
+  const measured = new SvelteMap<number, number>();
+  function ratio(item: Item): number {
+    const r = measured.get(item.id) ?? (item.width && item.height ? item.width / item.height : 1);
+    return Math.min(3.5, Math.max(0.4, r));
+  }
+  function measure(id: number, r: number) {
+    const old = measured.get(id);
+    if (old === undefined || Math.abs(old - r) > 0.02) measured.set(id, r);
+  }
 
   let lastClicked = -1;
 
@@ -129,16 +144,22 @@
     </header>
 
     {#if layout === 'grid'}
-      <div class="grid">
+      <div class="grid" class:justified={fit === 'full'}>
         {#each g.entries as { item, index } (item.id)}
-          <div class="cell">
+          <div class="cell" style:--r={fit === 'full' ? ratio(item) : undefined}>
             <button
               class="tile"
               aria-label="{item.original_name}, {captureDate(item)}"
               aria-pressed={selection && selecting ? selection.has(item.id) : undefined}
               onclick={(e) => click(e, index, item)}
             >
-              <Thumb {item} selecting={!!selection && selecting} selected={!!selection?.has(item.id)} />
+              <Thumb
+                {item}
+                {fit}
+                selecting={!!selection && selecting}
+                selected={!!selection?.has(item.id)}
+                onratio={fit === 'full' ? (r) => measure(item.id, r) : undefined}
+              />
             </button>
             {#if selection && !selecting}
               <button class="hover-check" aria-label="Selecionar" onclick={(e) => toggleCheck(e, index, item)}>
@@ -224,6 +245,27 @@
   .cell {
     position: relative;
   }
+  /* Justified rows: every tile keeps its photo's shape and the row fills the width.
+     flex-grow and flex-basis proportional to width/height keep one height per row;
+     the ::after spacer stops the last, incomplete row from stretching. */
+  .grid.justified {
+    --row: 150px;
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .grid.justified::after {
+    content: '';
+    flex-grow: 1000000;
+  }
+  .justified .cell {
+    flex-grow: var(--r);
+    flex-basis: calc(var(--r) * var(--row));
+    aspect-ratio: var(--r);
+    min-width: 0;
+  }
+  .justified .tile {
+    height: 100%;
+  }
   .tile {
     display: block;
     width: 100%;
@@ -271,6 +313,9 @@
     .grid {
       grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
       gap: 2px;
+    }
+    .grid.justified {
+      --row: 112px;
     }
     .rows {
       padding: 0 10px;

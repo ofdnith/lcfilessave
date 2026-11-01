@@ -29,8 +29,12 @@
 
   {#if e.phase === 'idle'}
     <ol class="steps panel">
-      <li>Conecte o iPhone ao Mac pelo cabo e desbloqueie-o.</li>
-      <li>Abra o <strong>Captura de Imagem</strong>, escolha o iPhone e importe tudo para uma pasta nova. <span class="muted">Não marque “Apagar após importar”.</span></li>
+      <li>Conecte o iPhone ao computador pelo cabo e desbloqueie-o.</li>
+      <li>
+        No Mac, abra o <strong>Captura de Imagem</strong>, escolha o iPhone e importe tudo para uma pasta nova.
+        No Windows, abra o app <strong>Fotos</strong> › Importar › escolha o iPhone e uma pasta nova.
+        <span class="muted">Não marque “Apagar após importar”.</span>
+      </li>
       <li>Escolha essa pasta aqui. O Acervo envia o que falta e confere cada arquivo pelo conteúdo.</li>
       <li>Só quando aparecer “seguro apagar do iPhone”, apague as fotos no próprio iPhone. Essa parte é sempre manual.</li>
     </ol>
