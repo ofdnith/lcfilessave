@@ -61,15 +61,13 @@ else
 fi
 
 say "5/9 Configuração"
-IP="$(termux-wifi-connectioninfo 2>/dev/null | python -c 'import json,sys; print(json.load(sys.stdin).get("ip",""))' 2>/dev/null || true)"
-if [[ -z "$IP" || "$IP" == "0.0.0.0" ]]; then
-  read -r -p "  IP do celular no Wi-Fi (ex.: 192.168.0.50): " IP
+if [[ -f "$CONF" ]]; then
+  ok "mantida a configuração que já existe ($CONF): nada a responder"
 fi
-ok "IP local: $IP (reserve este IP no roteador — veja docs/realme.md)"
-TS_NAME=""
-echo "  Dica: no painel do Tailscale (login.tailscale.com → Machines), renomeie este celular para 'acervo'."
-echo "  Assim o endereço é sempre acervo.<sua-rede>.ts.net, mesmo se um dia o servidor mudar de aparelho."
-read -r -p "  Nome do Tailscale deste celular (ex.: acervo.tail1234.ts.net) — Enter para pular: " TS_NAME || true
+# The server finds its Wi-Fi and Tailscale addresses by itself every time it starts
+# (acervo/publicname.py); this one only goes into the first certificate.
+IP="$(termux-wifi-connectioninfo 2>/dev/null | python -c 'import json,sys; print(json.load(sys.stdin).get("ip",""))' 2>/dev/null || true)"
+[[ "$IP" == "0.0.0.0" ]] && IP=""
 STORAGE_OK=""
 storage_access() {
   [[ -n "$STORAGE_OK" ]] && return
@@ -78,11 +76,12 @@ storage_access() {
   STORAGE_OK=1
 }
 BACKUP_DIR=""
+SD_DIR=""
+if [[ ! -f "$CONF" ]]; then
 if ask "Guardar uma cópia diária do catálogo na memória compartilhada (recomendado)?"; then
   storage_access
   BACKUP_DIR="$HOME/storage/shared/Acervo-copia-do-catalogo"
 fi
-SD_DIR=""
 if ask "Usar o cartão microSD para guardar tudo o que passar pela triagem (recomendado se houver cartão)?"; then
   storage_access
   if [[ -d "$HOME/storage/external-1" ]]; then
@@ -93,7 +92,6 @@ if ask "Usar o cartão microSD para guardar tudo o que passar pela triagem (reco
     warn "Cartão não encontrado (~/storage/external-1). Coloque o cartão e rode o instalador de novo."
   fi
 fi
-if [[ ! -f "$CONF" ]]; then
   read -r -p "  Seu e-mail (só vai junto dos avisos para o serviço da Apple; Enter para pular): " EMAIL
   {
     echo "# Gerado pelo instalar.sh em $(date '+%d/%m/%Y'). Comentários: acervo.example.toml"
@@ -102,7 +100,7 @@ if [[ ! -f "$CONF" ]]; then
     echo "port = 8765"
     echo "server_name = \"Realme\""
     echo "https = true"
-    echo -n "tls_names = [\"$IP\""; [[ -n "$TS_NAME" ]] && echo -n ", \"$TS_NAME\""; echo "]"
+    [[ -n "$IP" ]] && echo "tls_names = [\"$IP\"]"
     [[ -n "$BACKUP_DIR" ]] && echo "catalog_backup_dir = \"$BACKUP_DIR\""
     if [[ -n "$SD_DIR" ]]; then
       echo "sd_dir = \"$SD_DIR\""
@@ -118,8 +116,6 @@ if [[ ! -f "$CONF" ]]; then
     if [[ -n "${EMAIL:-}" ]]; then echo "push_contact = \"mailto:$EMAIL\""; fi
   } > "$CONF"
   ok "criado $CONF"
-else
-  ok "mantido $CONF (já existia)"
 fi
 ACERVO="$VENV/bin/acervo --config $CONF"
 $ACERVO migrate
@@ -136,8 +132,30 @@ else
   $ACERVO senha
 fi
 
-say "7/9 HTTPS, cidades e OCR em português"
+say "7/9 HTTPS, endereço seguro, cidades e OCR em português"
 $ACERVO certificado
+# acme.sh gets the Let's Encrypt certificates for the DuckDNS names (acervo duckdns).
+command -v openssl >/dev/null || pkg install -y openssl-tool >/dev/null 2>&1 || true
+if [[ -f "$HOME/.acme.sh/acme.sh" ]]; then
+  ok "acme.sh já instalado"
+else
+  ACME_TMP="$(mktemp -d)"
+  if git clone -q --depth 1 https://github.com/acmesh-official/acme.sh "$ACME_TMP/acme.sh" \
+     && (cd "$ACME_TMP/acme.sh" && sh ./acme.sh --install --home "$HOME/.acme.sh" \
+         --config-home "$HOME/.acme.sh/data" --no-cron --no-profile >/dev/null); then
+    ok "acme.sh (certificados do Let's Encrypt)"
+  else
+    warn "acme.sh não instalou agora; rode o instalador de novo mais tarde"
+  fi
+  rm -rf "$ACME_TMP"
+fi
+if [[ -f "$DATA/certificados/duckdns.json" ]]; then
+  ok "endereço seguro (DuckDNS) já configurado"
+elif ask "Configurar agora o endereço seguro (DuckDNS)? Com ele, o Safari e o app do Mac funcionam sem instalar certificado"; then
+  $ACERVO duckdns || warn "não terminou; rode depois: acervo-ctl duckdns"
+else
+  warn "sem endereço seguro: o Safari e o app do Mac vão pedir o certificado. Configure com: acervo-ctl duckdns"
+fi
 $ACERVO baixar-cidades || warn "sem internet agora; rode depois: acervo-ctl cidades"
 TESS="$PREFIX/share/tessdata"
 if [[ ! -f "$TESS/por.traineddata" ]]; then

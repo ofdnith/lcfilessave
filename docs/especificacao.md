@@ -46,6 +46,7 @@ iPhone e o app nativo no Mac. Só o app do Mac acessa discos externos. O catálo
 | iPhone | PWA + app Atalhos | Uso diário, backup automático |
 | Mac | Tauri 2 (Rust) reaproveitando a interface | Tudo do web app + discos, arquivamento, verificação |
 | Acesso remoto | Tailscale | Acesso fora de casa sem abrir portas |
+| HTTPS | DuckDNS + Let's Encrypt (acme.sh, desafio de DNS) | Endereços confiáveis sem instalar certificado; reserva: autoridade própria |
 
 Se a integração com o Copyparty se mostrar frágil, pode-se propor upload
 retomável próprio (protocolo tus), justificando a troca.

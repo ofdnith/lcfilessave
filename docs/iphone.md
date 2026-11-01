@@ -6,8 +6,9 @@ Três coisas: o **web app** (navegar, buscar, triar), o atalho **"Mandar pro bac
 > **Regra 1:** nada aqui apaga fotos do iPhone. Apagar só acontece pelo fluxo
 > **Esvaziar iPhone**, no app do Mac, depois da verificação — e quem apaga é você.
 
-Nos exemplos, o endereço do servidor é `https://192.168.0.50:8765`. Use o seu
-(o instalador mostra no final). Fora de casa, troque pelo nome do Tailscale.
+Nos exemplos, o endereço do servidor é `https://fulano-casa.duckdns.org:8765`, o
+**endereço seguro** de casa. Use o seu: no celular do Acervo, `acervo-ctl duckdns --mostrar`.
+Fora de casa, com o Tailscale ligado, use o endereço de fora (ex.: `https://fulano.duckdns.org:8765`).
 
 ## 1. Garantir originais
 
@@ -18,23 +19,30 @@ Nos exemplos, o endereço do servidor é `https://192.168.0.50:8765`. Use o seu
   o primeiro backup é mais lento). Para o **Esvaziar iPhone**, prefira desativar a
   otimização uns dias antes.
 
-## 2. Certificado (uma vez)
+## 2. Endereço seguro (no celular do Acervo, uma vez)
 
-O web app precisa de HTTPS, e o servidor usa um certificado próprio.
+O web app precisa de HTTPS. Com o **endereço seguro**, o certificado vem do
+Let's Encrypt, e o iPhone e o Mac confiam nele sozinhos: não há nada para instalar.
 
-1. No Safari, abra `https://192.168.0.50:8765/ca.crt`. Se aparecer um aviso
-   de segurança, toque em *Mostrar detalhes* → *visitar este site*.
-2. Toque em **Permitir** para baixar o perfil.
-3. Ajustes → **Perfil Transferido** (aparece no topo) → **Instalar**.
-4. Ajustes → Geral → Sobre → **Ajustes de Confiança de Certificados** → ative
-   **Acervo — autoridade local**.
+1. Entre em [duckdns.org](https://www.duckdns.org) e crie dois nomes: um para casa
+   (ex.: `fulano-casa`) e um para o Tailscale (ex.: `fulano`). O IP pode ficar qualquer um.
+2. No Termux do celular do Acervo: `acervo-ctl duckdns`. Cole o token (o código no
+   topo da página do DuckDNS) e os dois nomes.
+3. Em 2 a 5 minutos aparece **Tudo certo**, com os dois endereços.
 
-No Mac: abra o mesmo endereço, dê dois cliques no arquivo baixado, e no Acesso às
-Chaves marque o certificado como **Confiar sempre**.
+Daí em diante o servidor cuida de tudo sozinho: acompanha o IP do Wi-Fi e do
+Tailscale e renova o certificado antes de vencer. Nada fica aberto para a internet
+(regra 7): os nomes só apontam para endereços da sua casa e do seu Tailscale.
+
+> **Sem o endereço seguro** (ou enquanto ele não está pronto) dá para usar o
+> certificado próprio do Acervo: abra `https://<IP do celular>:8765/ca.crt` no
+> Safari, instale o perfil em Ajustes → **Perfil Transferido** e ative-o em
+> Ajustes → Geral → Sobre → **Ajustes de Confiança de Certificados**. No Mac, dê
+> dois cliques no arquivo e marque **Confiar sempre** no Acesso às Chaves.
 
 ## 3. Web app
 
-1. No Safari, abra `https://192.168.0.50:8765` e entre com a senha.
+1. No Safari, abra `https://fulano-casa.duckdns.org:8765` e entre com a senha.
 2. Toque em **Compartilhar** → **Adicionar à Tela de Início**.
 
 Ele abre em tela cheia, com a barra de abas embaixo, como um app.
@@ -53,7 +61,7 @@ Para publicar os seus depois de montá-los uma vez: no app Atalhos, segure o ata
 (`shortcut_manual_url` e `shortcut_daily_url`).
 
 Dica: crie primeiro um atalho chamado **Acervo config** com uma única ação
-**Dicionário** contendo `servidor = https://192.168.0.50:8765` e
+**Dicionário** contendo `servidor = https://fulano-casa.duckdns.org:8765` e
 `token = Bearer k3J9…`. Os outros atalhos começam com *Executar Atalho "Acervo config"*
 e usam esses valores — se o endereço mudar, você muda num lugar só.
 

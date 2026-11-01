@@ -7,6 +7,7 @@
   token criar NOME | token listar | token revogar ID
                    tokens para os Atalhos do iPhone
   certificado      cria o certificado HTTPS próprio
+  duckdns          endereço seguro (DuckDNS + Let's Encrypt): nada a instalar nos aparelhos
   baixar-cidades   baixa a base de cidades (lugar a partir do GPS, offline)
   processar        roda agora as tarefas pendentes (miniaturas, OCR…)
   verificar        confere disco × catálogo e corrige o que der
@@ -43,6 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     tok_rev = tok_sub.add_parser("revogar")
     tok_rev.add_argument("id", type=int)
     sub.add_parser("certificado", help="cria o certificado HTTPS próprio")
+    dd = sub.add_parser("duckdns", help="endereço seguro com DuckDNS e Let's Encrypt")
+    dd.add_argument("--mostrar", action="store_true", help="só mostra a situação atual")
+    dd.add_argument("--remover", action="store_true", help="desliga o endereço seguro")
     sub.add_parser("baixar-cidades", help="baixa a base de cidades para o lugar das fotos")
     sub.add_parser("processar", help="roda as tarefas pendentes agora")
     sub.add_parser("verificar", help="confere disco × catálogo")
@@ -75,7 +79,15 @@ def main(argv: list[str] | None = None) -> int:
         if ca.exists():
             from .migrate import ca_fingerprint
             print(f"certificado (impressão): {ca_fingerprint(ca.read_bytes())}")
+        from .publicname import addresses
+        addrs = addresses(cfg)
+        print(f"endereço seguro (casa):  {addrs['home'] or '(não configurado: acervo duckdns)'}")
+        if addrs["away"]:
+            print(f"endereço seguro (fora):  {addrs['away']}")
         return 0
+
+    if args.command == "duckdns":
+        return _duckdns(cfg, args)
 
     from .app import prepare  # imported late so `acervo config` works without FastAPI
 
@@ -133,7 +145,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "certificado":
         from .certs import generate
+        from .publicname import detect_addresses
         names = list(cfg.tls_names) or ([cfg.host] if not is_loopback(cfg.host) and cfg.host != "0.0.0.0" else [])
+        found = detect_addresses()  # the current Wi-Fi and Tailscale addresses, without asking
+        names += [ip for ip in (found["lan"], found["tailscale"]) if ip and ip not in names]
         ca = generate(cfg.subdir(CERTS_DIR), names)
         print(f"Certificado criado para: localhost, {', '.join(names) or '(nenhum outro nome)'}")
         print(f"Instale {ca} no iPhone e no Mac (veja docs/iphone.md).")
@@ -203,9 +218,95 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["ACERVO_CONFIG"] = str(cfg.config_file)
     os.environ["ACERVO_DATA_DIR"] = str(cfg.data_dir)  # so --reload workers see the same config
 
-    uvicorn.run("acervo.app:app_factory", factory=True, host=cfg.host, port=cfg.port, reload=args.reload,
-                log_level="info", timeout_keep_alive=30, **ssl)
+    if args.reload:
+        uvicorn.run("acervo.app:app_factory", factory=True, host=cfg.host, port=cfg.port, reload=True,
+                    log_level="info", timeout_keep_alive=30, **ssl)
+        return 0
+    config = uvicorn.Config("acervo.app:app_factory", factory=True, host=cfg.host, port=cfg.port,
+                            log_level="info", timeout_keep_alive=30, **ssl)
+    config.load()  # builds the SSL context now, so the certificate picker can be attached
+    if config.ssl is not None:
+        from .publicname import attach_sni
+        attach_sni(config.ssl, cfg)  # Let's Encrypt certificate for the DuckDNS names
+    uvicorn.Server(config).run()
     return 0
+
+
+def _duckdns(cfg, args) -> int:
+    from . import publicname as pn
+
+    if args.remover:
+        print("Endereço seguro desligado." if pn.remove(cfg) else "O endereço seguro já estava desligado.")
+        return 0
+    current = pn.load(cfg)
+    found = pn.detect_addresses()
+    if args.mostrar:
+        if current is None:
+            print("Endereço seguro: não configurado. Rode:  acervo-ctl duckdns")
+        else:
+            for role, fqdn in current.names():
+                ok = "certificado OK" if pn.cert_valid(cfg, fqdn) else "ainda sem certificado"
+                print(f"{'casa' if role == 'home' else 'fora'}: https://{fqdn}:{cfg.port}  ({ok})")
+        print(f"IP no Wi-Fi: {found['lan'] or '(não achei)'} · IP no Tailscale: {found['tailscale'] or '(desligado)'}")
+        return 0
+
+    print("Endereço seguro com DuckDNS: o Safari, o iPhone e o app do Mac passam a confiar no")
+    print("Acervo sem instalar nada. O servidor continua fechado para a internet.\n")
+    print("1. Entre em https://www.duckdns.org (com Google ou GitHub).")
+    print("2. Crie dois nomes: um para casa (ex.: fulano-casa) e um para o Tailscale (ex.: fulano).")
+    print("   O IP pode ficar qualquer um: o Acervo acerta sozinho.\n")
+    try:
+        token = pn.normalize_token(getpass.getpass("Token (o código no topo da página; não aparece ao colar): "))
+        home = pn.normalize_name(input("Nome para casa: "))
+        away_raw = input("Nome para o Tailscale (Enter para pular): ").strip()
+        away = pn.normalize_name(away_raw) if away_raw else ""
+    except pn.PublicNameError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelado.")
+        return 1
+    if away == home:
+        print("Use dois nomes diferentes (um para casa e outro para o Tailscale).", file=sys.stderr)
+        return 1
+
+    dd = pn.DuckDNS(token=token, home=home, away=away)
+    print(f"\nIP no Wi-Fi: {found['lan'] or '(não achei)'} · IP no Tailscale: {found['tailscale'] or '(desligado)'}")
+    if not found["lan"]:
+        print("Não achei o IP do Wi-Fi. Confira se o celular está conectado e tente de novo.", file=sys.stderr)
+        return 1
+    if not pn.duckdns_update(token, home, found["lan"]):
+        print(f"O DuckDNS recusou: confira o token e se o nome '{home}' existe na sua conta.", file=sys.stderr)
+        return 1
+    if away:
+        if found["tailscale"]:
+            if not pn.duckdns_update(token, away, found["tailscale"]):
+                print(f"O DuckDNS recusou o nome '{away}': confira se ele existe na sua conta.", file=sys.stderr)
+                return 1
+        else:
+            print("O Tailscale está desligado neste celular; o nome de fora é atualizado quando ele ligar.")
+    pn.save(cfg, dd)
+    print("Nomes salvos e apontados para este celular.")
+
+    if not pn.acme_available(cfg):
+        print(f"\nFalta o acme.sh (em {cfg.acme_home}). Rode o instalador de novo; ele instala.", file=sys.stderr)
+        return 1
+    if not cfg.https:
+        print("\nAviso: https = false no acervo.toml; o endereço seguro só funciona com https = true.")
+    ok = True
+    for role, fqdn in dd.names():
+        print(f"\nPedindo o certificado de {fqdn} ao Let's Encrypt (1 a 3 minutos)…")
+        pn.mark_attempt(cfg, fqdn)
+        if pn.issue(cfg, dd, fqdn):
+            print(f"Pronto: https://{fqdn}:{cfg.port}")
+        else:
+            ok = False
+            print(f"Não saiu agora (detalhes em {cfg.acme_home / 'acervo.log'}). "
+                  "O servidor tenta de novo sozinho em algumas horas.", file=sys.stderr)
+    if ok:
+        print("\nTudo certo. Use estes endereços no iPhone e no Mac; o app do Mac acha sozinho.")
+        print("Não precisa reiniciar: o servidor passa a usar os certificados na hora.")
+    return 0 if ok else 1
 
 
 def _migrar(cfg, args) -> int:

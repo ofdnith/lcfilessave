@@ -21,7 +21,7 @@ em lotes, quando o cartão enche. Um aviso lembra da triagem com 7 dias ou 5 GB 
 |---|---|
 | [docs/realme.md](docs/realme.md) | Instalar o servidor no Realme (Termux) |
 | [docs/migrar.md](docs/migrar.md) | Mudar o Acervo para um mini PC (ou outra máquina) |
-| [docs/iphone.md](docs/iphone.md) | Web app, certificado, Atalhos e backup diário |
+| [docs/iphone.md](docs/iphone.md) | Endereço seguro, web app, Atalhos e backup diário |
 | [mac/README.md](mac/README.md) | Baixar ou compilar o app do Mac e do Windows (HDs, Esvaziar iPhone) |
 | [docs/especificacao.md](docs/especificacao.md) | O plano do projeto (fonte da verdade) |
 | [docs/api.md](docs/api.md) | A API do servidor |
@@ -127,7 +127,7 @@ acervo-dados/
 ├── miniaturas/    por sha256, nunca apagadas
 ├── previas/       cache descartável (HEIC → JPEG para o navegador)
 ├── geo/           base de cidades offline
-├── certificados/  HTTPS próprio
+├── certificados/  HTTPS: certificado próprio, duckdns.json e publico/ (Let's Encrypt)
 ├── tmp/           uploads em andamento
 └── catalogo.db
 

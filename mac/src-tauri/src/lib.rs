@@ -13,6 +13,7 @@
 //! the window is open (spec: "só enquanto o app está aberto").
 
 mod config;
+mod discover;
 mod disks;
 mod transfer;
 mod upload;
@@ -63,6 +64,8 @@ const REMOTE_PERMISSIONS: &[&str] = &[
 struct Shared {
     config_path: PathBuf,
     server_url: Option<String>,
+    /// The same server's other trusted addresses (home / away).
+    alt_urls: Vec<String>,
     /// Origins that already got a runtime capability in this run.
     granted: HashSet<String>,
     /// URL of the bundled local page (differs between `tauri dev` and builds).
@@ -168,23 +171,61 @@ fn get_server_url(state: tauri::State<'_, AppState>) -> Option<String> {
     state.server_url()
 }
 
+#[derive(Serialize)]
+struct KnownServer {
+    server_url: Option<String>,
+    alt_urls: Vec<String>,
+}
+
+/// The saved address plus the server's other ones, in the order to try them.
+#[tauri::command]
+fn get_known_servers(state: tauri::State<'_, AppState>) -> KnownServer {
+    let sh = state.shared.lock().unwrap();
+    KnownServer {
+        server_url: sh.server_url.clone(),
+        alt_urls: sh.alt_urls.clone(),
+    }
+}
+
 #[tauri::command]
 fn set_server_url(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     url: String,
+    alt_urls: Option<Vec<String>>,
 ) -> Result<String, String> {
     let origin = config::normalize_server_url(&url)?;
     let path = state.shared.lock().unwrap().config_path.clone();
+    let mut alts: Vec<String> = match alt_urls {
+        Some(list) => list
+            .iter()
+            .filter_map(|u| config::normalize_server_url(u).ok())
+            .collect(),
+        // Same server, another of its addresses: keep what we knew.
+        None => state.shared.lock().unwrap().alt_urls.clone(),
+    };
+    alts.retain(|u| *u != origin);
+    alts.dedup();
     config::save(
         &path,
         &config::AppConfig {
             server_url: Some(origin.clone()),
+            alt_urls: alts.clone(),
         },
     )?;
-    state.shared.lock().unwrap().server_url = Some(origin.clone());
+    {
+        let mut sh = state.shared.lock().unwrap();
+        sh.server_url = Some(origin.clone());
+        sh.alt_urls = alts;
+    }
     grant_remote(&app, &state, &origin)?;
     Ok(origin)
+}
+
+/// Looks for an Acervo on the local network (see discover.rs).
+#[tauri::command]
+async fn discover_server() -> Result<Vec<discover::Found>, String> {
+    discover::sweep(discover::ACERVO_PORT).await
 }
 
 #[derive(Serialize)]
@@ -193,6 +234,9 @@ struct ServerCheck {
     status: String,
     version: Option<String>,
     problems: Vec<String>,
+    /// Trusted addresses the server reports (DuckDNS + Let's Encrypt), if any.
+    home: Option<String>,
+    away: Option<String>,
 }
 
 /// GET <url>/api/health from Rust (no CORS involved).
@@ -209,7 +253,13 @@ async fn test_server(
         .send()
         .await
         .map_err(|e| {
-            if e.is_timeout() {
+            if discover::is_tls_error(&e) && origin.starts_with("https://") {
+                format!(
+                    "{origin} respondeu, mas este computador não confia no certificado dele. \
+                     Use o endereço seguro do Acervo (no celular: acervo-ctl duckdns), \
+                     ou deixe o app procurar o servidor na rede."
+                )
+            } else if e.is_timeout() {
                 format!("{origin} não respondeu a tempo. O servidor está ligado e na mesma rede (ou no Tailscale)?")
             } else if e.is_connect() {
                 format!("Não consegui conectar a {origin}. Confira o endereço e se o servidor está ligado.")
@@ -248,7 +298,16 @@ async fn test_server(
                     .collect()
             })
             .unwrap_or_default(),
+        home: reported_address(&body, "home"),
+        away: reported_address(&body, "away"),
     })
+}
+
+fn reported_address(body: &serde_json::Value, role: &str) -> Option<String> {
+    let url = body.get("addresses")?.get(role)?.as_str()?;
+    config::normalize_server_url(url)
+        .ok()
+        .filter(|u| u.starts_with("https://"))
 }
 
 // ---------------------------------------------------------------------------
@@ -576,10 +635,16 @@ pub fn run() {
                 .server_url
                 .as_deref()
                 .and_then(|u| config::normalize_server_url(u).ok());
+            let alt_urls: Vec<String> = cfg
+                .alt_urls
+                .iter()
+                .filter_map(|u| config::normalize_server_url(u).ok())
+                .collect();
             let state = AppState {
                 shared: Arc::new(Mutex::new(Shared {
                     config_path,
                     server_url: server_url.clone(),
+                    alt_urls,
                     granted: HashSet::new(),
                     local_url: None,
                 })),
@@ -619,8 +684,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_server_url,
+            get_known_servers,
             set_server_url,
             test_server,
+            discover_server,
             list_disks,
             init_volume,
             copy_to_volume,
@@ -644,6 +711,7 @@ mod tests {
         Shared {
             config_path: PathBuf::new(),
             server_url: server.map(str::to_string),
+            alt_urls: Vec::new(),
             granted: HashSet::new(),
             local_url: Some(Url::parse("tauri://localhost/index.html").unwrap()),
         }

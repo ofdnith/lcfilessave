@@ -30,10 +30,8 @@ Na página do projeto no GitHub, abra **Releases** e baixe a versão mais nova:
 
 No Windows, os HDs aparecem pela letra (`E:`, `F:`…). Para formatar um HD em exFAT:
 Explorador de Arquivos › botão direito no disco › **Formatar** › Sistema de arquivos
-**exFAT** (isso apaga o HD). Para o certificado do servidor: abra
-`https://<servidor>:8765/ca.crt`, dê dois cliques no arquivo › **Instalar Certificado** ›
-**Usuário Atual** › **Colocar todos os certificados no repositório a seguir** ›
-**Autoridades de Certificação Raiz Confiáveis**.
+**exFAT** (isso apaga o HD). Com o endereço seguro configurado
+no servidor (`acervo-ctl duckdns`), não há certificado para instalar.
 
 ### Publicar uma versão nova (para quem mantém o projeto)
 
@@ -110,23 +108,25 @@ O app não é assinado pela Apple, então o macOS reclama na primeira vez:
 4. Quando você plugar um HD ou escolher uma pasta, o macOS pode pedir permissão
    para acessar **volumes removíveis** ou a pasta: clique em **Permitir**.
 
-## Apontar para o servidor
+## Encontrar o servidor
 
-Na primeira abertura aparece a tela **Endereço do servidor**:
+O app acha o Acervo sozinho:
 
-1. Digite o endereço que o servidor mostra, por exemplo
-   `http://192.168.0.50:8765` (em casa) ou `https://acervo.seu-tailnet.ts.net`
-   (pelo Tailscale, fora de casa).
-2. Clique em **Testar conexão**. Deve aparecer "Servidor encontrado".
-3. Clique em **Salvar e abrir**. A interface do Acervo aparece; faça login com
-   a senha do servidor.
+1. Ao abrir, ele tenta o endereço de casa e, se não responder, o do Tailscale.
+2. Se nenhum responder (ou na primeira vez), ele **procura o Acervo na rede**:
+   pergunta a cada endereço da sua rede local, leva poucos segundos.
+3. Na primeira vez, mostra o que encontrou: clique em **Usar este**. A interface
+   do Acervo aparece; faça login com a senha do servidor.
 
-Das próximas vezes o app abre direto no servidor. Se o servidor estiver
-desligado ou fora da rede, aparece uma tela com **Tentar de novo**.
+Para os endereços com certificado de verdade, configure uma vez o **endereço
+seguro** no celular (`acervo-ctl duckdns`, veja `docs/iphone.md`). O app aprende os
+dois endereços (casa e fora) e troca entre eles sozinho. Sem o endereço seguro, o
+app encontra o servidor, mas avisa que o computador não confia no certificado.
 
-Para mudar de servidor: menu **Acervo › Trocar servidor…**.
+Também dá para digitar o endereço: menu **Acervo › Trocar servidor…**. Sem
+`https://`, o app assume `https://`.
 
-O endereço fica salvo em
+Os endereços ficam salvos em
 `~/Library/Application Support/br.acervo.app/config.json`.
 
 ## Para quem desenvolve
@@ -151,8 +151,11 @@ cd mac/src-tauri && ACERVO_TEST_SERVER=http://127.0.0.1:8765 cargo test -- --ign
 - A janela principal carrega a interface **do servidor** (cookies de login no
   mesmo endereço; a interface não é duplicada). A interface detecta
   `window.__TAURI__` e chama os comandos nativos (`web/src/lib/native.ts`).
-- `src/index.html` é a única página embutida: endereço do servidor, teste e
-  tela de "servidor fora do ar".
+- `src/index.html` é a única página embutida: tenta os endereços salvos, procura o
+  servidor na rede (`discover_server`, em `src-tauri/src/discover.rs`), endereço
+  digitado e tela de "servidor fora do ar". A procura aceita qualquer certificado
+  só para ler o `/api/health` público (nunca manda o token); o endereço seguro que
+  ele informa é conferido com verificação normal e tem de apontar para a mesma máquina.
 - Permissões: o Tauri bloqueia comandos vindos de páginas remotas. Como o
   endereço do servidor é escolhido pelo usuário, o app cria em tempo de execução
   uma permissão (capability) só para **exatamente aquele endereço**
@@ -173,4 +176,4 @@ cd mac/src-tauri && ACERVO_TEST_SERVER=http://127.0.0.1:8765 cargo test -- --ign
 | `verify_volume_files` | relê arquivos do HD e confere os hashes |
 | `open_on_volume` | abre um original do HD no app padrão |
 | `pick_folder`, `scan_folder`, `hash_file`, `upload_file` | envio de pastas do Mac |
-| `get_server_url`, `set_server_url`, `test_server` | tela de endereço do servidor |
+| `get_server_url`, `get_known_servers`, `set_server_url`, `test_server`, `discover_server` | tela de endereço do servidor e procura na rede |

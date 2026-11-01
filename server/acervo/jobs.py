@@ -91,6 +91,8 @@ class Worker:
         loops = [(self._loop, "acervo-jobs"), (self._maintenance_loop, "acervo-maintenance")]
         if self.cfg.sd_for_library:
             loops.append((self._sd_loop, "acervo-sd"))
+        if self.cfg.https:
+            loops.append((self._public_name_loop, "acervo-enderecos"))
         for target, name in loops:
             t = threading.Thread(target=target, name=name, daemon=True)
             t.start()
@@ -138,6 +140,19 @@ class Worker:
                 log.exception("Erro ao copiar para o cartão microSD")
             if not moved:
                 self._stop.wait(timeout=60)
+
+    def _public_name_loop(self) -> None:
+        """DuckDNS addresses and Let's Encrypt certificates (publicname.py). Its own
+        thread: getting a certificate waits minutes for DNS and must not hold up
+        the trash or the catalog backup."""
+        from . import publicname
+        delay = 20
+        while not self._stop.wait(timeout=delay):
+            delay = 600
+            try:
+                publicname.upkeep(self.cfg)
+            except Exception:
+                log.exception("Erro ao cuidar do endereço seguro (DuckDNS)")
 
     def _maintenance_loop(self) -> None:
         delay = 30  # first run shortly after start, then every 10 minutes

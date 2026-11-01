@@ -248,6 +248,8 @@ export interface Health {
   };
   problems: string[];
   migration?: { active: boolean; started_at: string | null };
+  /** Trusted addresses (DuckDNS + Let's Encrypt) that already have a certificate. */
+  addresses?: { home: string | null; away: string | null };
 }
 
 export interface AuthStatus {

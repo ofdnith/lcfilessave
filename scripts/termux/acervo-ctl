@@ -2,6 +2,7 @@
 # Controle do Acervo no Realme.
 #   acervo-ctl start | stop | restart | status | logs
 #   acervo-ctl senha | token NOME | cidades | verificar | atualizar
+#   acervo-ctl duckdns [--mostrar | --remover]   endereço seguro (sem certificado para instalar)
 set -uo pipefail
 
 REPO="$HOME/acervo"
@@ -72,15 +73,18 @@ EOF
     else
       echo "Servidor: não responde"
     fi
-    $ACERVO config 2>/dev/null | grep -i "impressão" || true
+    $ACERVO config 2>/dev/null | grep -i -E "impressão|endereço seguro" || true
     ;;
   logs) tail -n 80 -f "$LOG" ;;
   senha) $ACERVO senha && echo "Reinicie com: acervo-ctl restart" ;;
   token) $ACERVO token criar "${2:-iPhone}" ;;   # para migrar: acervo-ctl token migracao
   cidades) $ACERVO baixar-cidades ;;
+  duckdns) $ACERVO duckdns "${@:2}" ;;
   verificar) "$0" stop; $ACERVO verificar; "$0" start ;;
   atualizar)
+    # Stop first: the update adjusts the catalog, and only a fresh start loads the new code.
+    "$0" stop
     cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/termux/instalar.sh"
     ;;
-  *) sed -n '2,4p' "$0"; exit 2 ;;
+  *) sed -n '2,5p' "$0"; exit 2 ;;
 esac

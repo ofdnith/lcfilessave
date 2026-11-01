@@ -2,6 +2,7 @@
 # Controle do Acervo no mini PC (Linux com systemd).
 #   acervo-ctl status | start | stop | restart | logs
 #   acervo-ctl senha | token NOME | cidades | verificar | atualizar
+#   acervo-ctl duckdns [--mostrar | --remover]   endereço seguro (sem certificado para instalar)
 set -uo pipefail
 
 REPO_INSTALLED=""   # filled in by instalar.sh
@@ -33,13 +34,14 @@ EOF
     else
       echo "Servidor: não responde"
     fi
-    $ACERVO config 2>/dev/null | grep -i "impressão" || true
+    $ACERVO config 2>/dev/null | grep -i -E "impressão|endereço seguro" || true
     ;;
   logs) journalctl -u acervo -n 80 -f ;;
   senha) $ACERVO senha && sudo systemctl restart acervo ;;
   token) $ACERVO token criar "${2:-iPhone}" ;;   # "migracao" = token de migração (24 h)
   cidades) $ACERVO baixar-cidades ;;
+  duckdns) $ACERVO duckdns "${@:2}" ;;
   verificar) sudo systemctl stop acervo; $ACERVO verificar; sudo systemctl start acervo ;;
   atualizar) cd "$REPO" && git pull --ff-only && bash "$REPO/scripts/linux/instalar.sh" --atualizar ;;
-  *) sed -n '2,4p' "$0"; exit 2 ;;
+  *) sed -n '2,5p' "$0"; exit 2 ;;
 esac

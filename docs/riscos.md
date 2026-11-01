@@ -8,7 +8,7 @@ Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código
 | 2 | Camada 1 dizer "já tenho" por engano | Resolvido: "seguro apagar" exige hash de cada arquivo |
 | 3 | Descartadas voltando todo dia | Resolvido: estado `purged` guarda o hash |
 | 4 | `pydantic-core` no Termux | Instalador tenta o pacote pronto e, se faltar, compila |
-| 5 | PWA exige HTTPS | Resolvido: autoridade de certificado própria (`acervo certificado`) |
+| 5 | PWA exige HTTPS | Resolvido: endereço seguro (DuckDNS + Let's Encrypt); reserva: autoridade própria |
 | 6 | Limites dos Atalhos | Documentado em `docs/iphone.md`; Live Photo completa só pelo Mac |
 | 7 | Copyparty + FastAPI | Resolvido: upload retomável próprio (tus) dentro do FastAPI |
 | 8 | Dados apagados se o Termux sair | Avisos no instalador + cópia diária do catálogo |
@@ -63,9 +63,19 @@ pouco, porque já evito recursos exclusivos do FastAPI.
 Sem HTTPS, o Safari não ativa o *service worker*: o web app até vai para a tela
 inicial, mas não funciona como app (sem cache, sem modo offline).
 
-**Tratamento:** o app Tailscale do Android não emite certificados, então o
-Acervo tem a própria autoridade de certificado (`acervo certificado`). Você
-instala o `ca.crt` uma vez no iPhone e no Mac, e o HTTPS vale em casa e pelo Tailscale.
+**Tratamento:** o app Tailscale do Android não emite certificados. O caminho
+principal é o **endereço seguro** (`acervo duckdns`): dois nomes no DuckDNS que
+apontam para o IP do Wi-Fi e o do Tailscale, com certificado do Let's Encrypt
+pelo desafio de DNS (ninguém conecta de fora; regra 7 intacta). O servidor
+acompanha os IPs e renova sozinho, e escolhe o certificado pelo nome pedido (SNI).
+Sem ele, sobra a autoridade de certificado própria (`acervo certificado`), que
+precisa ser instalada e marcada como confiável em cada aparelho; o Safari e o app
+do Mac recusam o servidor enquanto isso não for feito.
+
+**Dependências novas:** DuckDNS e Let's Encrypt precisam estar no ar para
+*renovar* (o certificado vale 90 dias e é renovado com 30 de folga). Alguns
+roteadores bloqueiam nomes da internet que apontam para IPs da casa ("proteção
+contra DNS rebinding"); se o endereço de casa não abrir no Wi-Fi, é isso.
 
 ## 6. Atalhos do iPhone têm limites
 

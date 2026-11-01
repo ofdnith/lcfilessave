@@ -50,9 +50,15 @@
   });
 
   // Migration state lives in /api/health; check it on load and every 30 s.
+  // When opened by IP (or the old Tailscale name), point to the trusted address:
+  // only it works in Safari and the Mac app without installing a certificate.
+  let safeUrl = $state<string | null>(null);
   async function checkHealth() {
     try {
-      app.migration = !!(await api.health()).migration?.active;
+      const h = await api.health();
+      app.migration = !!h.migration?.active;
+      const target = app.readonly ? h.addresses?.away : h.addresses?.home;
+      safeUrl = target && new URL(target).host !== location.host ? target + '/' + location.hash : null;
     } catch {
       /* the offline screen covers a dead server */
     }
@@ -157,6 +163,12 @@
       <div class="slim" role="status">
         <Icon name="shield" size={15} /> Fora de casa · modo seguro (não dá para apagar nem mexer em HDs)
       </div>
+    {/if}
+    {#if safeUrl}
+      <a class="banner top-banner" href={safeUrl}>
+        <Icon name="shield" size={18} />
+        <span>Há um endereço seguro para o Acervo. Abra por ele e salve na Tela de Início: funciona no Safari sem instalar certificado.</span>
+      </a>
     {/if}
     {#if overdue}
       <div class="banner top-banner" role="status"><Icon name="alert" size={18} /> Backup diário atrasado: mais de 48 h</div>

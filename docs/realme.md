@@ -76,18 +76,29 @@ No Termux:
 | `acervo-ctl token iPhone` | Cria um token para os Atalhos do iPhone |
 | `acervo-ctl senha` | Troca a senha |
 | `acervo-ctl atualizar` | Baixa a versão nova do Acervo e reinstala (os dados ficam) |
+| `acervo-ctl duckdns` | Configura o endereço seguro (DuckDNS + Let's Encrypt); `--mostrar` mostra os endereços |
 | `acervo-ctl verificar` | Para o servidor, confere disco × catálogo, corrige o que der e religa |
 | `acervo-ctl token migracao` | Token para levar o Acervo para outra máquina (`docs/migrar.md`) |
 
 Quando o celular reinicia, o Acervo sobe sozinho uns 20 segundos depois.
 
-## 5. Acesso fora de casa
+## 5. Endereço seguro e acesso fora de casa
 
-Com o Tailscale ligado no iPhone/Mac, use `https://<nome>.ts.net:8765`. Nenhuma porta
-fica aberta para a internet (regra 7). Se você não informou o nome do Tailscale na
-instalação, rode de novo o instalador ou acrescente o nome em `tls_names` no
-`~/acervo/acervo.toml`, rode `~/acervo/server/.venv/bin/acervo --config ~/acervo/acervo.toml certificado`
-e `acervo-ctl restart`. O certificado da autoridade (o que você instalou no iPhone) não muda.
+Rode `acervo-ctl duckdns` uma vez (passo a passo em `docs/iphone.md`, item 2). O
+Acervo ganha dois endereços com certificado do Let's Encrypt, que o Safari e o app
+do Mac aceitam sem instalar nada:
+
+- **casa** (ex.: `https://fulano-casa.duckdns.org:8765`) aponta para o IP do celular no Wi-Fi;
+- **fora** (ex.: `https://fulano.duckdns.org:8765`) aponta para o IP dele no Tailscale.
+  Por ele o Acervo fica em **modo seguro** (não apaga nem mexe em HDs).
+
+O servidor descobre os dois IPs sozinho a cada 10 minutos e atualiza o DuckDNS se
+mudarem; o certificado é renovado antes de vencer. Nenhuma porta fica aberta para a
+internet (regra 7). Para isso funcionar, deixe o **Tailscale ligado** no celular
+(VPN sempre ativa) e reserve o IP dele no roteador.
+
+Os nomes ficam num registro público de certificados (como todo site com HTTPS),
+mas só levam a endereços da sua casa e do seu Tailscale. Não use seu nome completo neles.
 
 ## 6. Cartão microSD — onde fica o que já foi triado
 

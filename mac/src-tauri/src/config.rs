@@ -1,4 +1,4 @@
-//! Persistent app settings (just the server address for now).
+//! Persistent app settings: the server address in use and the other known ones.
 //!
 //! Stored as JSON in the app config dir (on macOS:
 //! `~/Library/Application Support/br.acervo.app/config.json`).
@@ -13,14 +13,19 @@ use crate::transfer::io_pt;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
-    /// Normalized origin of the Acervo server, e.g. `http://192.168.0.50:8765`.
+    /// Normalized origin of the Acervo server in use, e.g. `https://fulano-casa.duckdns.org:8765`.
     #[serde(default)]
     pub server_url: Option<String>,
+    /// The server's other trusted addresses (home and away, from /api/health), tried
+    /// in order when `server_url` does not answer — e.g. away from home.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alt_urls: Vec<String>,
 }
 
 /// Turns what the user typed into a bare origin (`scheme://host[:port]`).
 ///
-/// Accepts `192.168.0.50:8765` (assumes http), `http://…`, `https://…`, with or
+/// Accepts `192.168.0.50:8765` (assumes https, as every Acervo installer sets up),
+/// `http://…`, `https://…`, with or
 /// without a trailing slash. Rejects paths, queries, credentials and anything
 /// that is not http/https, because the result is used both to navigate the
 /// window and as the remote-capability URL pattern: it must be exactly one origin.
@@ -32,7 +37,7 @@ pub fn normalize_server_url(input: &str) -> Result<String, String> {
     let with_scheme = if raw.contains("://") {
         raw.to_string()
     } else {
-        format!("http://{raw}")
+        format!("https://{raw}")
     };
     let url = reqwest::Url::parse(&with_scheme).map_err(|_| format!("Endereço inválido: {raw}"))?;
     match url.scheme() {
@@ -48,7 +53,7 @@ pub fn normalize_server_url(input: &str) -> Result<String, String> {
     }
     if url.path() != "/" && !url.path().is_empty() {
         return Err(
-            "Use só o endereço do servidor, sem caminho (ex.: http://192.168.0.50:8765).".into(),
+            "Use só o endereço do servidor, sem caminho (ex.: https://192.168.0.50:8765).".into(),
         );
     }
     if url.query().is_some() || url.fragment().is_some() {
@@ -103,7 +108,7 @@ mod tests {
     fn normalizes_common_inputs() {
         assert_eq!(
             normalize_server_url("192.168.0.50:8765").unwrap(),
-            "http://192.168.0.50:8765"
+            "https://192.168.0.50:8765"
         );
         assert_eq!(
             normalize_server_url(" http://192.168.0.50:8765/ ").unwrap(),
@@ -144,8 +149,12 @@ mod tests {
         assert_eq!(load(&path), AppConfig::default());
         let cfg = AppConfig {
             server_url: Some("http://a:1".into()),
+            alt_urls: vec!["https://b.duckdns.org:8765".into()],
         };
         save(&path, &cfg).unwrap();
         assert_eq!(load(&path), cfg);
+        // Files written by older versions (no alt_urls) still load.
+        std::fs::write(&path, br#"{"server_url":"https://x:1"}"#).unwrap();
+        assert_eq!(load(&path).server_url.as_deref(), Some("https://x:1"));
     }
 }

@@ -255,9 +255,12 @@ Fluxo da transferência:
 
 - `GET /api/health` — sem login. Estado do servidor, catálogo e disco; `storage` traz os mesmos
   campos de Entrada e cartão de `/api/stats`, e `thermal` = `{temperature, max_temp_c, paused}`.
+  `service` = `"acervo"` (é como o app do computador reconhece um Acervo ao procurar na rede) e
+  `addresses` = `{home, away}`: os endereços seguros (DuckDNS + Let's Encrypt) que já têm
+  certificado, ou `null`.
 - `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version, battery,
   inbox_max_gb, sd_for_library, thermal}`.
-- `GET /ca.crt` — certificado para instalar no iPhone/Mac quando o HTTPS próprio está ativo.
+- `GET /ca.crt` — certificado para instalar no iPhone/Mac quando se usa o HTTPS próprio (sem endereço seguro).
 
 ---
 

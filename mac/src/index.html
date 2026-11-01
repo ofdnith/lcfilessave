@@ -84,6 +84,11 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .center { text-align: center; }
+  .found { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; }
+  .found strong { display: block; word-break: break-all; }
+  .found small { color: var(--muted); }
+  .linklike { border: none; padding: 0; color: var(--accent); font-weight: 500; background: none; }
 </style>
 </head>
 <body>
@@ -93,33 +98,49 @@
     <h1>Acervo</h1>
   </div>
 
-  <!-- Shown while trying the saved server at startup -->
+  <!-- Shown while trying the saved addresses at startup -->
   <section id="connecting" class="hidden center">
     <div class="spinner"></div>
     <p>Conectando a <strong id="connecting-url"></strong>…</p>
   </section>
 
-  <!-- Saved server did not answer -->
+  <!-- Looking for an Acervo on the local network -->
+  <section id="searching" class="hidden center">
+    <div class="spinner"></div>
+    <p>Procurando o Acervo na sua rede…</p>
+  </section>
+
+  <!-- Servers found on the network: the owner confirms which one -->
+  <section id="found" class="hidden">
+    <p>Encontrei na sua rede:</p>
+    <div id="found-list"></div>
+    <div class="row">
+      <button id="found-search" type="button">Procurar de novo</button>
+      <button id="found-manual" type="button" class="linklike">Digitar o endereço</button>
+    </div>
+  </section>
+
+  <!-- Nothing answered -->
   <section id="offline" class="hidden">
     <p id="offline-msg"></p>
     <div class="row">
       <button id="retry" class="primary" type="button">Tentar de novo</button>
-      <button id="change" type="button">Trocar servidor</button>
+      <button id="search" type="button">Procurar na rede</button>
+      <button id="change" type="button" class="linklike">Digitar o endereço</button>
     </div>
   </section>
 
   <!-- Server address form -->
   <form id="setup" class="hidden" autocomplete="off">
-    <p>Digite o endereço do seu servidor Acervo. Você o encontra na tela do
-       servidor ou no Tailscale.</p>
+    <p>O app procura o Acervo sozinho na rede de casa. Se preferir, digite o endereço.</p>
     <label for="url">Endereço do servidor</label>
     <input id="url" name="url" type="text" inputmode="url" spellcheck="false"
-           autocapitalize="off" placeholder="http://192.168.0.50:8765" required>
-    <div class="hint">Em casa: <code>http://192.168.0.50:8765</code> · Fora de casa:
-      <code>https://acervo.seu-tailnet.ts.net</code></div>
+           autocapitalize="off" placeholder="https://seunome-casa.duckdns.org:8765" required>
+    <div class="hint">O endereço seguro aparece no celular com <code>acervo-ctl duckdns --mostrar</code>.
+      Um IP também serve: <code>192.168.1.104:8765</code></div>
     <div class="row">
-      <button id="test" type="button">Testar conexão</button>
-      <button id="save" class="primary" type="submit">Salvar e abrir</button>
+      <button id="save" class="primary" type="submit">Conectar</button>
+      <button id="setup-search" type="button">Procurar na rede</button>
       <button id="cancel" type="button" class="hidden">Cancelar</button>
     </div>
   </form>
@@ -133,6 +154,7 @@
   const $ = (id) => document.getElementById(id);
   const tauri = window.__TAURI__;
   const params = new URLSearchParams(location.search);
+  const SECTIONS = ["connecting", "searching", "found", "offline", "setup"];
 
   function invoke(cmd, args) {
     if (!tauri || !tauri.core) {
@@ -142,9 +164,7 @@
   }
 
   function show(section) {
-    for (const id of ["connecting", "offline", "setup"]) {
-      $(id).classList.toggle("hidden", id !== section);
-    }
+    for (const id of SECTIONS) $(id).classList.toggle("hidden", id !== section);
   }
 
   function setStatus(text, kind) {
@@ -154,14 +174,7 @@
   }
 
   function busy(on) {
-    for (const id of ["test", "save", "retry"]) $(id).disabled = on;
-  }
-
-  function describe(check) {
-    const v = check.version ? ` (versão ${check.version})` : "";
-    if (check.status === "ok") return { text: `Servidor encontrado${v}. Tudo certo.`, kind: "ok" };
-    const p = check.problems && check.problems.length ? `: ${check.problems.join("; ")}` : "";
-    return { text: `Servidor encontrado${v}, mas com problemas${p}.`, kind: "warn" };
+    for (const id of ["save", "retry", "search", "setup-search", "found-search"]) $(id).disabled = on;
   }
 
   function openServer(url) {
@@ -170,80 +183,142 @@
     location.replace(url + "/");
   }
 
-  async function connectSaved(url) {
-    show("connecting");
-    $("connecting-url").textContent = url;
-    setStatus("");
-    try {
-      await invoke("test_server", { url });
-      openServer(url);
-    } catch (err) {
-      show("offline");
-      $("offline-msg").textContent = String(err);
-      setStatus("O servidor não respondeu.", "err");
+  /** Saves the address that worked (preferring the trusted one) and opens it. */
+  async function useServer(check, url) {
+    let chosen = url;
+    const alts = [check.home, check.away].filter(Boolean);
+    // Reached by IP, but the server has a trusted address that works: switch to it.
+    if (check.home && check.home !== url) {
+      try { await invoke("test_server", { url: check.home }); chosen = check.home; } catch (_) { /* keep url */ }
     }
+    const origin = await invoke("set_server_url", { url: chosen, altUrls: alts });
+    openServer(origin);
   }
 
-  async function testTyped() {
-    const url = $("url").value;
+  /** Tries the saved address and the server's other ones, then searches the network. */
+  async function autoConnect() {
+    let known = { server_url: null, alt_urls: [] };
+    try { known = await invoke("get_known_servers"); } catch (err) { setStatus(String(err), "err"); }
+    const candidates = [known.server_url, ...(known.alt_urls || [])].filter(Boolean);
+    let lastErr = null;
+    for (const url of [...new Set(candidates)]) {
+      show("connecting");
+      $("connecting-url").textContent = url;
+      setStatus("");
+      try {
+        const check = await invoke("test_server", { url });
+        await useServer(check, url);
+        return;
+      } catch (err) {
+        lastErr = String(err);
+      }
+    }
+    await searchNetwork(lastErr);
+  }
+
+  async function searchNetwork(previousErr) {
+    show("searching");
+    setStatus("");
+    busy(true);
+    let found = [];
+    try {
+      found = await invoke("discover_server");
+    } catch (err) {
+      busy(false);
+      offline(String(err));
+      return;
+    }
+    busy(false);
+    if (!found.length) {
+      offline((previousErr ? previousErr + " " : "") +
+        "Não achei nenhum Acervo nesta rede. O celular do Acervo está ligado e no mesmo Wi-Fi? " +
+        "Fora de casa, use o endereço do Tailscale.");
+      return;
+    }
+    const list = $("found-list");
+    list.textContent = "";
+    for (const f of found) {
+      const row = document.createElement("div");
+      row.className = "found";
+      const text = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = f.home || f.url;
+      const small = document.createElement("small");
+      small.textContent = (f.version ? `versão ${f.version}` : "Acervo") +
+        (f.home ? ` · no IP ${f.url.replace(/^https?:\/\//, "")}` : " · sem endereço seguro ainda");
+      text.append(name, small);
+      const btn = document.createElement("button");
+      btn.className = "primary";
+      btn.type = "button";
+      btn.textContent = "Usar este";
+      btn.addEventListener("click", () => pick(f));
+      row.append(text, btn);
+      list.append(row);
+    }
+    show("found");
+  }
+
+  async function pick(f) {
+    busy(true);
+    setStatus("Conectando…", "busy");
+    const tries = [f.home, f.away, f.url].filter(Boolean);
+    let lastErr = null;
+    for (const url of tries) {
+      try {
+        const check = await invoke("test_server", { url });
+        if (!check.home && f.home) check.home = f.home;
+        if (!check.away && f.away) check.away = f.away;
+        await useServer(check, url);
+        return;
+      } catch (err) {
+        lastErr = String(err);
+      }
+    }
+    busy(false);
+    setStatus(lastErr + (f.home ? "" : " No celular, rode  acervo-ctl duckdns  e abra o app de novo."), "err");
+  }
+
+  function offline(message) {
+    show("offline");
+    $("offline-msg").textContent = message;
+    setStatus("");
+  }
+
+  async function connectTyped(ev) {
+    ev.preventDefault();
+    const typed = $("url").value;
     busy(true);
     setStatus("Testando…", "busy");
     try {
-      const check = await invoke("test_server", { url });
+      const check = await invoke("test_server", { url: typed });
       $("url").value = check.url;
-      const d = describe(check);
-      setStatus(d.text, d.kind);
-      return check;
-    } catch (err) {
-      setStatus(String(err), "err");
-      return null;
-    } finally {
-      busy(false);
-    }
-  }
-
-  async function saveAndOpen(ev) {
-    ev.preventDefault();
-    const check = await testTyped();
-    if (!check) return;
-    busy(true);
-    try {
-      const origin = await invoke("set_server_url", { url: check.url });
-      openServer(origin);
+      await useServer(check, check.url);
     } catch (err) {
       setStatus(String(err), "err");
       busy(false);
     }
   }
 
-  async function start() {
-    let saved = null;
-    try { saved = await invoke("get_server_url"); } catch (err) { setStatus(String(err), "err"); }
+  async function showSetup() {
+    const saved = await invoke("get_server_url").catch(() => null);
     if (saved) $("url").value = saved;
     $("cancel").classList.toggle("hidden", !saved);
-
-    if (saved && !params.has("trocar")) {
-      connectSaved(saved);
-    } else {
-      show("setup");
-      $("url").focus();
-      $("url").select();
-    }
+    show("setup");
+    setStatus("");
+    $("url").focus();
+    $("url").select();
   }
 
-  $("test").addEventListener("click", testTyped);
-  $("setup").addEventListener("submit", saveAndOpen);
-  $("retry").addEventListener("click", async () => {
-    const saved = await invoke("get_server_url").catch(() => null);
-    if (saved) connectSaved(saved); else show("setup");
-  });
-  $("change").addEventListener("click", () => { show("setup"); setStatus(""); $("url").focus(); });
-  $("cancel").addEventListener("click", async () => {
-    const saved = await invoke("get_server_url").catch(() => null);
-    if (saved) connectSaved(saved);
-  });
+  $("setup").addEventListener("submit", connectTyped);
+  $("retry").addEventListener("click", autoConnect);
+  $("search").addEventListener("click", () => searchNetwork(null));
+  $("setup-search").addEventListener("click", () => searchNetwork(null));
+  $("found-search").addEventListener("click", () => searchNetwork(null));
+  $("found-manual").addEventListener("click", showSetup);
+  $("change").addEventListener("click", showSetup);
+  $("cancel").addEventListener("click", autoConnect);
 
-  start();
+  if (params.has("trocar")) showSetup(); else autoConnect();
 })();
 </script>
 </body>

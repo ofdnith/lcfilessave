@@ -50,6 +50,8 @@ class Config:
     trash_days: int = 30
     https: bool = False
     tls_names: tuple[str, ...] = ()
+    # acme.sh (Let's Encrypt through DuckDNS, see publicname.py). Installed by instalar.sh.
+    acme_home: Path = field(default_factory=lambda: Path.home() / ".acme.sh")
     sd_dir: Path | None = None
     # True: everything kept in triage goes to the microSD (the phone keeps only the
     # Entrada). False: the card is only used when internal storage passes the alert.
@@ -129,7 +131,7 @@ _INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", 
              "inbox_max_gb", "max_temp_c", "inbox_alert_days", "inbox_alert_gb"}
 _STR_KEYS = {"host", "server_name", "remote_mode", "shortcut_manual_url", "shortcut_daily_url", "push_contact"}
 _BOOL_KEYS = {"https", "workers", "sd_for_library"}
-_PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir"}
+_PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir", "acme_home"}
 _LIST_KEYS = {"tls_names", "remote_networks"}
 _ALLOWED_KEYS = _INT_KEYS | _STR_KEYS | _BOOL_KEYS | _PATH_KEYS | _LIST_KEYS
 

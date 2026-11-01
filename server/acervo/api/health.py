@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import __version__, db, library, media
+from .. import __version__, db, library, media, publicname
 from ..config import Config
 from ..storage import disk_usage, missing_or_unwritable
 
@@ -92,6 +92,7 @@ def health(request: Request) -> JSONResponse:
         "cities": bool(gaz and gaz.available),
     }
     body = {
+        "service": "acervo",  # how the Mac app recognizes an Acervo when it searches the network
         "status": "ok" if ok else "degraded",
         "version": __version__,
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -101,5 +102,7 @@ def health(request: Request) -> JSONResponse:
         "tools": tools,
         "migration": _migration(cfg),
         "problems": problems,
+        # Trusted addresses (DuckDNS + Let's Encrypt) that already have a certificate.
+        "addresses": publicname.addresses(cfg),
     }
     return JSONResponse(body, status_code=200 if ok else 503)

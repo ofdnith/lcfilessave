@@ -150,6 +150,22 @@ fi
 
 say "7/8 HTTPS, cidades e serviço"
 $ACERVO certificado   # mantém a autoridade que veio na migração: o iPhone continua confiando
+# acme.sh: Let's Encrypt certificates for the DuckDNS names (acervo duckdns).
+if [[ ! -f "$HOME/.acme.sh/acme.sh" ]]; then
+  ACME_TMP="$(mktemp -d)"
+  if git clone -q --depth 1 https://github.com/acmesh-official/acme.sh "$ACME_TMP/acme.sh" \
+     && (cd "$ACME_TMP/acme.sh" && sh ./acme.sh --install --home "$HOME/.acme.sh" \
+         --config-home "$HOME/.acme.sh/data" --no-cron --no-profile >/dev/null); then
+    ok "acme.sh (certificados do Let's Encrypt)"
+  else
+    warn "acme.sh não instalou agora; rode o instalador de novo mais tarde"
+  fi
+  rm -rf "$ACME_TMP"
+fi
+if [[ ! -f "$DATA/certificados/duckdns.json" ]] && [[ "${1:-}" != "--atualizar" ]] \
+   && ask "Configurar agora o endereço seguro (DuckDNS)? Com ele, o Safari e o app do Mac funcionam sem instalar certificado"; then
+  $ACERVO duckdns || warn "não terminou; rode depois: acervo-ctl duckdns"
+fi
 [[ -f "$DATA/geo/cities.txt" ]] || $ACERVO baixar-cidades || warn "sem internet agora; depois: acervo-ctl cidades"
 sudo tee /etc/systemd/system/acervo.service >/dev/null <<EOF
 [Unit]

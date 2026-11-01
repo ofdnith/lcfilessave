@@ -14,10 +14,15 @@ port = 8765
 # Nome mostrado na interface.
 server_name = "Acervo (Mac)"
 
-# HTTPS próprio (necessário para o web app no iPhone).
-# 1) liste os endereços pelos quais o servidor é acessado; 2) rode: acervo certificado
+# HTTPS (necessário para o web app no iPhone). Com https = true:
+# - endereço seguro, recomendado: rode  acervo duckdns  (DuckDNS + Let's Encrypt; os IPs
+#   do Wi-Fi e do Tailscale são descobertos sozinhos, nada a instalar nos aparelhos);
+# - certificado próprio, de reserva: rode  acervo certificado  (já inclui os IPs atuais;
+#   tls_names acrescenta outros nomes).
 https = false
-# tls_names = ["192.168.0.50", "realme.tail1234.ts.net"]
+# tls_names = ["192.168.0.50"]
+# Onde fica o acme.sh (instalado pelo instalar.sh).
+# acme_home = "~/.acme.sh"
 
 # Alerta quando o disco passar desta porcentagem.
 storage_alert_pct = 80
