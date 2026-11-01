@@ -1,7 +1,8 @@
 """Tuning for the Snapdragon 680 phone: heat pause, OCR on a reduced image,
-in-memory perceptual hashes, and the microSD as the home of the Acervo.
+in-memory perceptual hashes, and bringing items back from the retired microSD.
 
-The microSD flow deletes the internal copy of a file, so every way it can be
+The card was retired on 01/11/2026. Items copied there before that come back to
+the phone's own storage; that deletes the card copy, so every way it can be
 interrupted is tested here (rule 3: nothing goes without a verified copy).
 """
 
@@ -21,7 +22,7 @@ from acervo.jobs import Worker
 from acervo.neardup import PhashIndex, np
 from acervo.places import Gazetteer
 
-from conftest import make_jpeg, sha
+from conftest import make_jpeg, put_on_card, sha
 
 
 # --- heat ---------------------------------------------------------------------------------
@@ -148,7 +149,9 @@ def test_near_duplicates_ignore_items_discarded_after_indexing(api, tmp_path):
 # --- Entrada limit --------------------------------------------------------------------------
 
 def test_uploads_stop_when_the_entrada_is_full(api, tmp_path, monkeypatch):
+    from dataclasses import replace
     from acervo.api import uploads
+    api.client.app.state.config = replace(api.cfg, inbox_max_gb=100)  # off by default since 01/11/2026
     monkeypatch.setattr(uploads, "inbox_bytes", lambda conn: 100 * 1_000_000_000)
     p = make_jpeg(tmp_path / "IMG_FULL.JPG")
     res = api.post("/api/upload", params={"source": "web"}, content=p.read_bytes(),
@@ -158,15 +161,26 @@ def test_uploads_stop_when_the_entrada_is_full(api, tmp_path, monkeypatch):
 
 def test_inbox_limit_in_config(tmp_path):
     conf = tmp_path / "acervo.toml"
-    conf.write_text('inbox_max_gb = 90\nsd_dir = "sd"\nsd_for_library = true\nmax_temp_c = 42\n')
+    conf.write_text('inbox_max_gb = 90\nmax_temp_c = 42\n')
     cfg = load_config(conf)
-    assert (cfg.inbox_max_gb, cfg.sd_for_library, cfg.max_temp_c) == (90, True, 42)
-    conf.write_text("sd_for_library = true\n")
-    with pytest.raises(ConfigError):
-        load_config(conf)
+    assert (cfg.inbox_max_gb, cfg.max_temp_c) == (90, 42)
 
 
-# --- microSD as the home of the Acervo ------------------------------------------------------
+def test_retired_options_in_an_old_config_are_ignored(tmp_path):
+    conf = tmp_path / "acervo.toml"
+    conf.write_text('sd_dir = "sd"\nsd_for_library = true\nremote_mode = "seguro"\n')
+    cfg = load_config(conf)
+    assert cfg.sd_dir is not None
+    assert not hasattr(cfg, "sd_for_library") and not hasattr(cfg, "remote_mode")
+
+
+# --- the retired microSD: items come back to the phone --------------------------------------
+
+@pytest.fixture
+def roomy(monkeypatch):
+    """The phone has plenty of room, whatever the disk running the tests looks like."""
+    monkeypatch.setattr(library, "disk_usage", lambda path: storage.DiskUsage(100 * 10**9, 30 * 10**9, 70 * 10**9))
+
 
 def _files(cfg, item_id):
     c = db.connect(cfg.db_path)
@@ -176,56 +190,60 @@ def _files(cfg, item_id):
         c.close()
 
 
-def _kept(api, tmp_path, name="IMG_SD.JPG", pattern=1):
+def _on_card(api, tmp_path, name="IMG_SD.JPG", pattern=1):
     src = make_jpeg(tmp_path / "in" / name, pattern=pattern)
     iid = api.upload(src)["item_id"]
     api.act([iid], "keep")
+    put_on_card(api.cfg, iid)
+    (f,) = _files(api.cfg, iid)
+    assert f["root"] == "sd"
     return iid, sha(src)
 
 
-def test_keep_is_instant_and_the_card_gets_a_verified_copy(sd_api, tmp_path):
-    cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
-    (f,) = _files(cfg, iid)
-    assert f["root"] == "main"  # triage does not wait on the card
-    internal = cfg.data_dir / f["rel_path"]
+def test_keep_never_goes_to_the_card(sd_api, tmp_path, roomy):
+    src = make_jpeg(tmp_path / "in" / "IMG_K.JPG")
+    iid = sd_api.upload(src)["item_id"]
+    sd_api.act([iid], "keep")
+    assert _files(sd_api.cfg, iid)[0]["root"] == "main"
+    assert library.choose_root(sd_api.cfg, 10) == "main"
 
-    assert library.migrate_to_sd(cfg) == 1
+
+def test_card_items_come_back_verified(sd_api, tmp_path, roomy):
+    cfg = sd_api.cfg
+    iid, digest = _on_card(sd_api, tmp_path)
     (f,) = _files(cfg, iid)
     on_card = cfg.sd_dir / f["rel_path"]
-    assert f["root"] == "sd" and f["rel_path"].startswith("acervo/2024/05/")
-    assert sha(on_card) == digest
-    assert not internal.exists()
-    assert not list(cfg.sd_dir.rglob("*.part"))
+
+    assert library.bring_back_from_card(cfg) == 1
+    (f,) = _files(cfg, iid)
+    inside = cfg.data_dir / f["rel_path"]
+    assert f["root"] == "main" and f["rel_path"].startswith("acervo/2024/05/")
+    assert sha(inside) == digest
+    assert not on_card.exists()
+    assert not list(cfg.data_dir.rglob("*.part"))
     c = db.connect(cfg.db_path)
-    assert c.execute("SELECT count(*) FROM events WHERE action = 'to-sd' AND item_id = ?", (iid,)).fetchone()[0] == 1
+    assert c.execute("SELECT count(*) FROM events WHERE action = 'from-sd' AND item_id = ?", (iid,)).fetchone()[0] == 1
     c.close()
     res = sd_api.get(f"/api/items/{iid}/original")
-    assert res.status_code == 200 and res.content == on_card.read_bytes()  # served from the card
-    assert library.migrate_to_sd(cfg) == 0  # nothing left
+    assert res.status_code == 200 and res.content == inside.read_bytes()
+    assert library.bring_back_from_card(cfg) == 0  # nothing left
 
 
-def test_entrada_never_goes_to_the_card(sd_api, tmp_path):
-    iid = sd_api.upload(make_jpeg(tmp_path / "IMG_IN.JPG"))["item_id"]
-    assert library.migrate_to_sd(sd_api.cfg) == 0
-    assert _files(sd_api.cfg, iid)[0]["root"] == "main"
-
-
-def test_a_bad_copy_on_the_card_keeps_the_internal_one(sd_api, tmp_path, monkeypatch):
+def test_a_bad_copy_inside_keeps_the_card_one(sd_api, tmp_path, monkeypatch, roomy):
     cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
+    iid, digest = _on_card(sd_api, tmp_path)
     (f,) = _files(cfg, iid)
     real = storage.sha256_file
     monkeypatch.setattr(storage, "sha256_file", lambda p: "0" * 64 if ".part" in p.name else real(p))
-    assert library.migrate_to_sd(cfg) == 0
-    assert _files(cfg, iid)[0]["root"] == "main"
-    assert sha(cfg.data_dir / f["rel_path"]) == digest
-    assert not [p for p in cfg.sd_dir.rglob("*") if p.is_file()]
+    assert library.bring_back_from_card(cfg) == 0
+    assert _files(cfg, iid)[0]["root"] == "sd"
+    assert sha(cfg.sd_dir / f["rel_path"]) == digest
+    assert not list((cfg.data_dir / "acervo").rglob("*.JPG"))
 
 
-def test_discarded_during_the_copy_leaves_no_orphan_on_the_card(sd_api, tmp_path, monkeypatch):
+def test_discarded_during_the_copy_leaves_no_orphan_inside(sd_api, tmp_path, monkeypatch, roomy):
     cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
+    iid, digest = _on_card(sd_api, tmp_path)
     real_copy = library.copy_verified
 
     def copy_then_discard(src, dst, expected):
@@ -236,49 +254,48 @@ def test_discarded_during_the_copy_leaves_no_orphan_on_the_card(sd_api, tmp_path
         finally:
             c.close()
     monkeypatch.setattr(library, "copy_verified", copy_then_discard)
-    assert library.migrate_to_sd(cfg) == 0
+    assert library.bring_back_from_card(cfg) == 0
     (f,) = _files(cfg, iid)
-    assert f["rel_path"].startswith("lixeira/") and f["root"] == "main"
-    assert sha(cfg.data_dir / f["rel_path"]) == digest
-    assert not [p for p in cfg.sd_dir.rglob("*") if p.is_file()]
+    assert f["rel_path"].startswith("lixeira/") and f["root"] == "sd"
+    assert sha(cfg.sd_dir / f["rel_path"]) == digest
+    assert not list((cfg.data_dir / "acervo").rglob("*.JPG"))
 
 
-def test_killed_after_the_copy_before_the_switch(sd_api, tmp_path):
-    """Process dies with the copy on the card but the catalog still pointing inside:
-    the card copy is redundant and reconcile removes it; the original is untouched."""
+def test_killed_after_the_copy_before_the_switch(sd_api, tmp_path, roomy):
+    """Process dies with the copy inside but the catalog still pointing to the card:
+    the inside copy is redundant and reconcile removes it; the card copy is untouched."""
     cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
+    iid, digest = _on_card(sd_api, tmp_path)
     (f,) = _files(cfg, iid)
-    storage.copy_verified(cfg.data_dir / f["rel_path"], cfg.sd_dir / f["rel_path"], digest)
+    storage.copy_verified(cfg.sd_dir / f["rel_path"], cfg.data_dir / f["rel_path"], digest)
     rep = reconcile(cfg, sd_api.client.app.state.ingestor)
     assert rep["removed_copies"] == 1
-    assert not (cfg.sd_dir / f["rel_path"]).exists()
-    assert sha(cfg.data_dir / f["rel_path"]) == digest
-    assert _files(cfg, iid)[0]["root"] == "main"
+    assert not (cfg.data_dir / f["rel_path"]).exists()
+    assert sha(cfg.sd_dir / f["rel_path"]) == digest
+    assert _files(cfg, iid)[0]["root"] == "sd"
 
 
-def test_killed_after_the_switch_before_deleting_the_internal_copy(sd_api, tmp_path):
+def test_killed_after_the_switch_before_deleting_the_card_copy(sd_api, tmp_path, roomy):
     cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
+    iid, digest = _on_card(sd_api, tmp_path)
     (before,) = _files(cfg, iid)
-    leftover = cfg.data_dir / before["rel_path"]
+    leftover = cfg.sd_dir / before["rel_path"]
     keep_bytes = leftover.read_bytes()
-    library.migrate_to_sd(cfg)
+    library.bring_back_from_card(cfg)
     leftover.write_bytes(keep_bytes)  # as if the delete never happened
     rep = reconcile(cfg, sd_api.client.app.state.ingestor)
     assert rep["removed_copies"] == 1 and not leftover.exists()
     (f,) = _files(cfg, iid)
-    assert f["root"] == "sd" and sha(cfg.sd_dir / f["rel_path"]) == digest
+    assert f["root"] == "main" and sha(cfg.data_dir / f["rel_path"]) == digest
 
 
-def test_nothing_moves_to_the_card_during_a_migration(sd_api, tmp_path, monkeypatch):
+def test_nothing_comes_back_during_a_migration(sd_api, tmp_path, monkeypatch, roomy):
     from acervo.catalog import set_setting
     cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
+    iid, digest = _on_card(sd_api, tmp_path)
     c = db.connect(cfg.db_path)
     set_setting(c, "migration_active", "1")
-    assert library.migrate_to_sd(cfg) == 0
-    # A copy already running when the migration starts must not switch either.
+    assert library.bring_back_from_card(cfg) == 0
     set_setting(c, "migration_active", "")
     real_copy = library.copy_verified
 
@@ -286,57 +303,31 @@ def test_nothing_moves_to_the_card_during_a_migration(sd_api, tmp_path, monkeypa
         real_copy(src, dst, expected)
         set_setting(c, "migration_active", "1")
     monkeypatch.setattr(library, "copy_verified", copy_then_freeze)
-    assert library.migrate_to_sd(cfg) == 0
+    assert library.bring_back_from_card(cfg) == 0
     (f,) = _files(cfg, iid)
-    assert f["root"] == "main" and sha(cfg.data_dir / f["rel_path"]) == digest
-    assert not [p for p in cfg.sd_dir.rglob("*") if p.is_file()]
+    assert f["root"] == "sd" and sha(cfg.sd_dir / f["rel_path"]) == digest
+    assert not list((cfg.data_dir / "acervo").rglob("*.JPG"))
     c.close()
 
 
-def test_full_or_missing_card_keeps_everything_inside(sd_api, tmp_path, monkeypatch):
+def test_no_room_inside_or_missing_card_leaves_items_on_the_card(sd_api, tmp_path, monkeypatch, roomy):
     cfg = sd_api.cfg
-    iid, _ = _kept(sd_api, tmp_path)
-    monkeypatch.setattr(library, "sd_has_room", lambda cfg, size: False)
-    assert library.migrate_to_sd(cfg) == 0
-    monkeypatch.undo()
+    iid, _ = _on_card(sd_api, tmp_path)
+    with monkeypatch.context() as m:
+        m.setattr(library, "internal_has_room", lambda cfg, size: False)
+        assert library.bring_back_from_card(cfg) == 0
     gone = Config(**{**cfg.__dict__, "sd_dir": tmp_path / "cartao-removido"})
-    assert library.migrate_to_sd(gone) == 0
-    assert _files(cfg, iid)[0]["root"] == "main"
-    assert library.migrate_to_sd(cfg) == 1  # card back with room: it catches up
+    assert library.bring_back_from_card(gone) == 0
+    assert _files(cfg, iid)[0]["root"] == "sd"
+    assert library.bring_back_from_card(cfg) == 1  # card back, room inside: it catches up
 
 
-def test_items_on_the_card_can_be_discarded_and_restored(sd_api, tmp_path):
+def test_items_still_on_the_card_can_be_discarded_and_restored(sd_api, tmp_path, roomy):
     cfg = sd_api.cfg
-    iid, digest = _kept(sd_api, tmp_path)
-    library.migrate_to_sd(cfg)
+    iid, digest = _on_card(sd_api, tmp_path)
     sd_api.act([iid], "discard")
     (f,) = _files(cfg, iid)
     assert f["root"] == "sd" and f["rel_path"].startswith("lixeira/")
     sd_api.act([iid], "restore")
     (f,) = _files(cfg, iid)
     assert f["root"] == "sd" and sha(cfg.sd_dir / f["rel_path"]) == digest
-
-
-def test_card_holds_a_catalog_copy_and_instructions(sd_api, tmp_path):
-    cfg = sd_api.cfg
-    _kept(sd_api, tmp_path)
-    w = Worker(cfg, sd_api.client.app.state.exiftool, Gazetteer(cfg.subdir("geo")))
-    w.maintenance()
-    rescue = cfg.sd_dir / jobs.SD_RESCUE_DIR
-    copies = list(rescue.glob("catalogo-*.db"))
-    assert len(copies) == 1 and (rescue / "LEIA-ME.txt").is_file()
-    c = db.connect(copies[0])
-    assert c.execute("SELECT count(*) FROM items").fetchone()[0] == 1
-    c.close()
-
-
-def test_stats_show_entrada_and_card(sd_api, tmp_path):
-    iid, _ = _kept(sd_api, tmp_path)
-    s = sd_api.get("/api/stats").json()["storage"]
-    assert s["inbox_max_bytes"] == 100 * 1_000_000_000
-    assert s["sd"]["present"] and s["sd"]["pending_bytes"] > 0 and s["sd"]["library_bytes"] == 0
-    library.migrate_to_sd(sd_api.cfg)
-    s = sd_api.get("/api/stats").json()["storage"]
-    assert s["sd"]["pending_bytes"] == 0 and s["sd"]["library_bytes"] > 0
-    h = sd_api.client.get("/api/health").json()
-    assert h["storage"]["sd"]["present"] is True

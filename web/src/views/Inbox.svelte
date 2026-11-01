@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpLink from '../components/HelpLink.svelte';
   import { untrack } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import Icon from '../components/Icon.svelte';
@@ -140,6 +141,7 @@
     <div class="counter">
       <span class="big num">{num(count)}</span>
       <span class="label">{count === 1 ? 'item aguardando triagem' : 'itens aguardando triagem'}</span>
+      <HelpLink slug="triagem" label="Como fazer a triagem" />
     </div>
     <div class="hero-actions">
       {#if summary && summary.clean === 0 && summary.processing > 0}
@@ -196,9 +198,7 @@
 {#if selecting}
   <SelectionBar count={selection.size} onclear={stopSelecting}>
     <button class="btn small keep" disabled={!selection.size} onclick={() => batch('keep')}><Icon name="check" size={15} /> Manter</button>
-    {#if !app.readonly}
       <button class="btn small danger" disabled={!selection.size} onclick={() => batch('discard')}><Icon name="trash" size={15} /> Descartar</button>
-    {/if}
     <button class="btn small" disabled={!selection.size} onclick={() => pickAlbum([...selection], stopSelecting)} aria-label="Adicionar ao álbum"><Icon name="albumAdd" size={15} /></button>
     <button class="btn small" disabled={!selection.size} onclick={() => batch('important')} aria-label="Marcar como importante"><Icon name="star" size={15} /><span class="hide-sm">Importante</span></button>
   </SelectionBar>
@@ -215,7 +215,7 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 16px;
-    padding: calc(var(--sat) + 12px) 0 20px;
+    padding: calc(var(--page-top, var(--sat)) + 12px) 0 20px;
   }
   .counter {
     display: flex;
@@ -255,9 +255,10 @@
   }
   .filters {
     position: sticky;
-    top: 0;
+    /* Stuck: always below the status bar, whether or not banners took the inset. */
+    top: calc(var(--sat) - var(--page-top, var(--sat)));
     z-index: 10;
-    padding: calc(var(--sat) + 8px) 0 0;
+    padding: calc(var(--page-top, var(--sat)) + 8px) 0 0;
     margin: 0 -24px 6px;
     padding-left: 24px;
     padding-right: 24px;

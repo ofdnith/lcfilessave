@@ -206,7 +206,7 @@
   const dims = $derived(item?.width && item?.height ? `${num(item.width)} × ${num(item.height)}` : null);
   const mp = $derived(item?.width && item?.height ? Math.round((item.width * item.height) / 1e5) / 10 : null);
   const onDriveOnly = $derived(!!item && !item.on_server && !!item.volume);
-  const canTrash = $derived(!!item && !app.readonly && item.state !== 'archived' && item.state !== 'trash');
+  const canTrash = $derived(!!item && item.state !== 'archived' && item.state !== 'trash');
 </script>
 
 <svelte:window onkeydown={onKey} />

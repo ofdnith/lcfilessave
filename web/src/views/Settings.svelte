@@ -45,11 +45,10 @@
       <dl class="grid">
         <div><dt>No acervo</dt><dd class="num">{num(st.tabs.all.count)} itens · {bytes(st.tabs.all.bytes)}</dd></div>
         <div><dt>Na Entrada</dt><dd class="num">{num(st.inbox_count)}</dd></div>
-        <div><dt>Arquivados em HD</dt><dd class="num">{num(st.archived_count)}</dd></div>
+        <div><dt>Arquivados em armazenamentos</dt><dd class="num">{num(st.archived_count)}</dd></div>
         <div><dt>Na lixeira</dt><dd class="num">{num(st.trash_count)}</dd></div>
-        <div><dt>Disco do celular</dt><dd class="num">{bytes(st.storage.disk_free_bytes)} livres de {bytes(st.storage.disk_total_bytes)}</dd></div>
         {#if settings}
-          <div><dt>Lote por HD</dt><dd class="num">{num(settings.archive_batch_gb)} GB · {settings.archive_copies} {settings.archive_copies === 1 ? 'cópia' : 'cópias'}</dd></div>
+          <div><dt>Tamanho do lote</dt><dd class="num">{num(settings.archive_batch_gb)} GB · {settings.archive_copies} {settings.archive_copies === 1 ? 'cópia' : 'cópias'}</dd></div>
         {/if}
       </dl>
     {/if}
@@ -66,6 +65,15 @@
     </a>
   </nav>
 
+  <a class="panel help-card" href={href('ajuda')}>
+    <span class="help-icon"><Icon name="book" size={22} /></span>
+    <span class="help-txt">
+      <strong>Ajuda e tutoriais</strong>
+      <span class="muted">Passo a passo de tudo: instalar no iPhone, backup diário, triagem, lotes para o armazenamento, avisos e problemas.</span>
+    </span>
+    <Icon name="right" size={16} />
+  </a>
+
   {#if !isNative()}
     <IphoneSetup />
     <PushSettings />
@@ -74,7 +82,7 @@
   {#if isNative()}
     <section class="panel">
       <h2>App do computador</h2>
-      <p class="muted">HDs, transferências e o Esvaziar iPhone ficam em <a href={href('dispositivos')}>Dispositivos</a>.</p>
+      <p class="muted">Armazenamentos, transferências e o Esvaziar iPhone ficam em <a href={href('dispositivos')}>Dispositivos</a>.</p>
     </section>
   {/if}
 
@@ -125,7 +133,7 @@
     align-self: flex-start;
   }
   .page-title {
-    padding-top: var(--sat);
+    padding-top: var(--page-top, var(--sat));
   }
   h2 {
     font-size: 16px;
@@ -134,6 +142,39 @@
   .panel p {
     margin: 0 0 12px;
     font-size: 14px;
+  }
+  .help-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .help-card:hover {
+    border-color: var(--line);
+  }
+  .help-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .help-txt {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 14px;
+  }
+  .help-txt .muted {
+    font-size: 13px;
+  }
+  .help-card > :global(svg:last-child) {
+    color: var(--faint);
   }
   .shortcuts {
     display: none;

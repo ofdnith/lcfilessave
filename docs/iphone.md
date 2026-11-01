@@ -105,13 +105,13 @@ são poucas ações:
    `Authorization`) → **Obter Valor do Dicionário** `summary_text` → **Mostrar
    Notificação** (ex.: "Backup diário: 37 fotos, 4 vídeos").
 
-Normalmente `since` é a data do último backup menos um dia. Se um arquivo do
-cartão microSD falhar na verificação, por 3 dias ele volta até uma hora antes
-da foto estragada, para o atalho mandá-la de novo e o envio consertar a cópia.
+Normalmente `since` é a data do último backup menos um dia. Se uma cópia no
+servidor falhar numa verificação, por 3 dias ele volta até uma hora antes da foto
+estragada, para o atalho mandá-la de novo e o envio consertar a cópia.
 
 O atalho **não tem nenhuma ação de apagar** — e não deve ter (regra 1). Tudo o que
 ele envia cai na **Entrada** (regra 2). Fotos que já estão no Acervo, foram para
-um HD ou foram descartadas são reconhecidas pelo hash e não são guardadas de novo.
+um armazenamento ou foram descartadas são reconhecidas pelo hash e não são guardadas de novo.
 
 ### Automação
 
@@ -127,20 +127,26 @@ Com o web app na tela de início (passo 3) e o iOS 16.4 ou mais novo:
 **Ajustes → Avisos → Receber avisos** e permita as notificações. Escolha o que quer receber:
 
 - **Backup diário atrasado** — o iPhone não manda fotos há mais de 48 h.
-- **Servidor ficando cheio** — hora de transferir um lote para um HD.
-- **Problema num HD** — a verificação de saúde achou arquivo que não confere.
+- **Pouco espaço no celular do Acervo** — transfira um lote ou faça a triagem.
+- **Lote pronto para o armazenamento** — 5 GB juntos, ou algo mantido há 14 dias
+  que só existe no celular: conecte um armazenamento no computador e transfira.
+- **Problema num armazenamento** — a verificação de saúde achou arquivo que não confere.
 - **Resumo do backup diário** — "Backup diário: 37 fotos, 4 vídeos".
+- **Entrada esperando triagem** — algo na Entrada há 7 dias ou mais de 5 GB.
+
+Os mesmos avisos aparecem como faixas no topo do Acervo; tocar leva aonde se
+resolve. Cada um se repete no máximo a cada 3 dias (todo dia se for urgente).
 
 Toque em **Enviar aviso de teste** para conferir. O servidor só manda o aviso
 para o serviço de notificações da Apple; nenhuma porta é aberta.
 
 ## 8. Fora de casa
 
-Pelo Tailscale, o Acervo abre em **modo seguro**: dá para ver, buscar, baixar,
-enviar, manter itens da Entrada, marcar importantes e mexer em álbuns. Descartar,
-esvaziar a lixeira e mexer em HDs ficam só para a rede de casa. Assim, um celular
-perdido e desbloqueado não consegue apagar nada. Para liberar tudo também fora de
-casa, use `remote_mode = "completo"` no `acervo.toml`.
+Pelo Tailscale, o Acervo funciona **igual a dentro de casa** (desde 01/11/2026 não
+há mais modo seguro): triagem, descarte, lixeira, transferir lotes pelo app do
+computador, tokens — tudo, sempre com a senha. Um `remote_mode` que tenha sobrado
+no `acervo.toml` é ignorado (pode apagar a linha). Se o iPhone for perdido,
+revogue as sessões e tokens em Ajustes e troque a senha (`acervo-ctl senha`).
 
 Use sempre os endereços seguros (o de casa e o de fora), nunca o IP. Se um dia o
 servidor mudar do Realme para um mini PC, os nomes vão junto (`docs/migrar.md`) e

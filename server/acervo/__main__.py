@@ -70,9 +70,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pasta de dados:          {cfg.data_dir}")
         print(f"catálogo:                {cfg.db_path}")
         print(f"endereço:                {'https' if cfg.https else 'http'}://{cfg.host}:{cfg.port}")
-        print(f"cartão microSD:          {cfg.sd_dir or '(não usado)'}")
+        if cfg.sd_dir:
+            print(f"cartão microSD antigo:   {cfg.sd_dir} (aposentado; o que restar volta sozinho)")
         print(f"alerta de espaço:        {cfg.storage_alert_pct}%")
-        print(f"lote de arquivamento:    {cfg.archive_batch_gb} GB · cópias em HD: {cfg.archive_copies}")
+        print(f"lote de arquivamento:    {cfg.archive_batch_gb} GB · cópias por item: {cfg.archive_copies}")
         print(f"dias na lixeira:         {cfg.trash_days}")
         print(f"interface:               {cfg.web_dir}")
         ca = cfg.subdir(CERTS_DIR) / "ca.crt"

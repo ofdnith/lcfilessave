@@ -13,10 +13,13 @@ tests can point the server somewhere else without editing anything.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8765
 DEFAULT_DATA_DIR = Path.home() / "acervo-dados"
@@ -52,22 +55,24 @@ class Config:
     tls_names: tuple[str, ...] = ()
     # acme.sh (Let's Encrypt through DuckDNS, see publicname.py). Installed by instalar.sh.
     acme_home: Path = field(default_factory=lambda: Path.home() / ".acme.sh")
+    # Retired microSD card (until 01/11/2026). Kept only so files that were copied to
+    # the card before it was retired stay readable; the next archive batch takes
+    # them to an external storage. Nothing new is ever written there.
     sd_dir: Path | None = None
-    # True: everything kept in triage goes to the microSD (the phone keeps only the
-    # Entrada). False: the card is only used when internal storage passes the alert.
-    sd_for_library: bool = False
-    # Maximum size of the Entrada (awaiting triage), in GB. 0 = no limit.
-    inbox_max_gb: int = 100
+    # Maximum size of the Entrada (awaiting triage), in GB. 0 = no limit: uploads
+    # stop only when the disk runs out (the Entrada and the Acervo share it).
+    inbox_max_gb: int = 0
     # Reminder to triage: Entrada with something older than this many days, or
     # bigger than this many GB. 0 turns each one off.
     inbox_alert_days: int = 7
     inbox_alert_gb: int = 5
+    # Batch reminder: kept items still only on the server for this many days. 0 = off
+    # (then only the batch size, archive_batch_gb, triggers it).
+    archive_alert_days: int = 14
     # Background jobs pause while the battery is at or above this temperature (°C).
     max_temp_c: int = 40
     catalog_backup_dir: Path | None = None
     web_dir: Path = field(default_factory=lambda: REPO_WEB_DIST)
-    # Away from home (Tailscale): "seguro" forbids deleting and drive operations.
-    remote_mode: str = "seguro"
     remote_networks: tuple[str, ...] = ("100.64.0.0/10", "fd7a:115c:a1e0::/48")
     shortcut_manual_url: str = ""
     shortcut_daily_url: str = ""
@@ -98,8 +103,6 @@ class Config:
             raise ConfigError("archive_batch_gb deve ser maior que zero.")
         if self.archive_copies not in (1, 2, 3):
             raise ConfigError("archive_copies deve ser 1, 2 ou 3.")
-        if self.remote_mode not in ("seguro", "completo"):
-            raise ConfigError('remote_mode deve ser "seguro" ou "completo".')
         for net in self.remote_networks:
             try:
                 ipaddress.ip_network(net)
@@ -107,12 +110,12 @@ class Config:
                 raise ConfigError(f"remote_networks: rede inválida '{net}'.") from None
         if self.inbox_max_gb < 0:
             raise ConfigError("inbox_max_gb não pode ser negativo (0 = sem limite).")
+        if self.archive_alert_days < 0:
+            raise ConfigError("archive_alert_days não pode ser negativo (0 = desligado).")
         if self.inbox_alert_days < 0 or self.inbox_alert_gb < 0:
             raise ConfigError("inbox_alert_days e inbox_alert_gb não podem ser negativos (0 = desligado).")
         if not (30 <= self.max_temp_c <= 55):
             raise ConfigError("max_temp_c deve ficar entre 30 e 55 (graus Celsius).")
-        if self.sd_for_library and self.sd_dir is None:
-            raise ConfigError("sd_for_library = true precisa de sd_dir (o caminho do cartão microSD).")
         if self.trash_days < 30:
             # Inviolable rule 6: discarded items spend 30 days in the trash.
             raise ConfigError("trash_days não pode ser menor que 30 (regra da lixeira).")
@@ -128,12 +131,17 @@ def is_loopback(host: str) -> bool:
 
 
 _INT_KEYS = {"port", "storage_alert_pct", "archive_batch_gb", "archive_copies", "trash_days",
-             "inbox_max_gb", "max_temp_c", "inbox_alert_days", "inbox_alert_gb"}
-_STR_KEYS = {"host", "server_name", "remote_mode", "shortcut_manual_url", "shortcut_daily_url", "push_contact"}
-_BOOL_KEYS = {"https", "workers", "sd_for_library"}
+             "inbox_max_gb", "max_temp_c", "inbox_alert_days", "inbox_alert_gb",
+             "archive_alert_days"}
+_STR_KEYS = {"host", "server_name", "shortcut_manual_url", "shortcut_daily_url", "push_contact"}
+_BOOL_KEYS = {"https", "workers"}
 _PATH_KEYS = {"data_dir", "sd_dir", "catalog_backup_dir", "web_dir", "acme_home"}
 _LIST_KEYS = {"tls_names", "remote_networks"}
 _ALLOWED_KEYS = _INT_KEYS | _STR_KEYS | _BOOL_KEYS | _PATH_KEYS | _LIST_KEYS
+# Options that no longer exist; old acervo.toml files that still have them keep working.
+#   sd_for_library: the microSD as home of the Acervo (retired 01/11/2026)
+#   remote_mode:    the restricted mode away from home (retired 01/11/2026)
+_OBSOLETE_KEYS = {"sd_for_library", "remote_mode"}
 
 
 def load_config(path: str | os.PathLike[str] | None = None, **overrides: object) -> Config:
@@ -149,6 +157,9 @@ def load_config(path: str | os.PathLike[str] | None = None, **overrides: object)
         except tomllib.TOMLDecodeError as exc:
             raise ConfigError(f"Erro de sintaxe em {file_path}: {exc}") from None
 
+        for key in _OBSOLETE_KEYS & set(raw):
+            log.info("Opção '%s' do %s não existe mais e foi ignorada; pode apagar a linha.", key, file_path.name)
+            raw.pop(key)
         unknown = set(raw) - _ALLOWED_KEYS
         if unknown:
             raise ConfigError(f"Opções desconhecidas em {file_path}: {', '.join(sorted(unknown))}")

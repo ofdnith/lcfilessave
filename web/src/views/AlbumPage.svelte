@@ -153,7 +153,7 @@
     color: var(--muted);
     text-decoration: none;
     font-size: 14px;
-    margin: var(--sat) 0 6px;
+    margin: var(--page-top, var(--sat)) 0 6px;
   }
   .head {
     display: flex;

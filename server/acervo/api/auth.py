@@ -26,7 +26,7 @@ def status(request: Request) -> dict:
         conn.close()
     method = auth.identify(request)
     return {"password_set": has_password, "authenticated": method is not None, "method": method,
-            "remote": auth.is_remote(request), "readonly": auth.readonly(request)}
+            "remote": auth.is_remote(request)}
 
 
 @router.post("/login")
@@ -66,7 +66,7 @@ def logout(request: Request, response: Response) -> dict:
     return {"ok": True}
 
 
-@router.post("/app-token", dependencies=[Depends(auth.require_auth), Depends(auth.forbid_remote)])
+@router.post("/app-token", dependencies=[Depends(auth.require_auth)])
 def app_token(request: Request) -> dict:
     """Long-lived token for the Mac app's native commands (downloads to drives, uploads)."""
     cfg = request.app.state.config
@@ -101,7 +101,7 @@ class TokenBody(BaseModel):
     label: str = "iPhone"
 
 
-@tokens_router.post("/tokens", dependencies=[Depends(auth.forbid_remote)])
+@tokens_router.post("/tokens")
 def create_api_token(body: TokenBody, request: Request) -> dict:
     conn = db.connect(request.app.state.config.db_path)
     try:
@@ -115,7 +115,7 @@ def create_api_token(body: TokenBody, request: Request) -> dict:
     return {"id": tid, "token": token}
 
 
-@tokens_router.delete("/tokens/{token_id}", dependencies=[Depends(auth.forbid_remote)])
+@tokens_router.delete("/tokens/{token_id}")
 def revoke_api_token(token_id: int, request: Request) -> dict:
     conn = db.connect(request.app.state.config.db_path)
     try:

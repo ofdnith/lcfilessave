@@ -4,6 +4,7 @@
   import { devices } from '../lib/devices.svelte';
   import { href } from '../lib/router.svelte';
   import { app, toast } from '../lib/state.svelte';
+  const batch = $derived(app.stats?.storage.batch ?? null);
   import type { Disk } from '../lib/native';
   import type { Volume } from '../lib/types';
 
@@ -15,7 +16,7 @@
     adding = d.mount_path;
     try {
       const v = await devices.addVolume(d);
-      toast(`HD preparado como ${v.name}. Escreva esse nome numa etiqueta no HD.`, 'ok', undefined, 9000);
+      toast(`Armazenamento preparado como ${v.name}. Escreva esse nome numa etiqueta colada nele.`, 'ok', undefined, 9000);
     } catch (e) {
       toast(`Não foi possível adicionar: ${(e as Error).message}`, 'error');
     } finally {
@@ -37,8 +38,24 @@
 </script>
 
 <div class="page devices">
-  <h1 class="page-title">Dispositivos</h1>
-  <p class="page-sub">O servidor e os HDs conectados a este Mac. Atualiza sozinho.</p>
+  <div class="title-row">
+    <h1 class="page-title">Dispositivos</h1>
+    <a class="btn small ghost help" href="#/ajuda/transferir-lote"><Icon name="help" size={16} /> Como funciona</a>
+  </div>
+  <p class="page-sub">O servidor e os armazenamentos (HD, SSD, pendrive…) conectados a este computador. Atualiza sozinho.</p>
+
+  {#if batch && batch.bytes > 0}
+    <section class="panel next-batch">
+      <Icon name="drive" size={20} />
+      <div>
+        <strong class="num">{bytes(batch.bytes)} prontos para o próximo lote</strong>
+        <p class="muted small">
+          Itens mantidos no Acervo que ainda só existem no celular{#if batch.oldest_days}, o mais antigo há {plural(batch.oldest_days, 'dia', 'dias')}{/if}.
+          {devices.disks.some((d) => devices.volumeFor(d)) ? 'Toque em Transferir lote para cá no armazenamento abaixo.' : 'Conecte um armazenamento para transferir.'}
+        </p>
+      </div>
+    </section>
+  {/if}
 
   <section class="card server" class:bad={devices.healthError || h?.status === 'degraded'}>
     <span class="dev-icon"><Icon name="server" size={26} /></span>
@@ -59,12 +76,13 @@
     <span class="dot" class:ok={h?.status === 'ok' && !devices.healthError}></span>
   </section>
 
-  <h2 class="sec">HDs conectados</h2>
+  <h2 class="sec">Armazenamentos conectados</h2>
   {#if devices.diskError}<p class="error-text">{devices.diskError}</p>{/if}
   {#if !devices.disks.length}
     <div class="empty panel">
       <Icon name="drive" size={28} />
-      <p>Conecte um HD externo para transferir um lote ou verificar a saúde dele.</p>
+      <p>Conecte um HD, SSD ou pendrive para transferir um lote ou verificar a saúde dele.</p>
+      <a class="small" href="#/ajuda/preparar-armazenamento">Como preparar um armazenamento novo</a>
     </div>
   {/if}
 
@@ -77,9 +95,6 @@
           <h2><span class="label-tag">{v.name}</span></h2>
           <p class="muted num">{bytes(d.free_bytes)} livres de {bytes(d.total_bytes)} · {plural(v.item_count, 'item', 'itens')}</p>
           <p class="faint small">{checkLine(v)}</p>
-          {#if app.readonly}
-            <p class="lock small"><Icon name="lock" size={14} /> Fora de casa, transferir e verificar HDs ficam bloqueados.</p>
-          {:else}
           <div class="acts">
             <button class="btn small primary" disabled={busy} onclick={() => devices.startTransfer(d, v)}>
               <Icon name="download" size={15} /> Transferir lote para cá
@@ -91,16 +106,13 @@
               Verificação completa
             </button>
           </div>
-          {/if}
         {:else if d.volume}
           <h2>{d.label || d.mount_path}</h2>
           <p class="muted">Tem um {d.volume.name}, mas o servidor não conhece este volume. Ele pode ser de outro Acervo.</p>
         {:else}
           <h2>{d.label || d.mount_path}</h2>
           <p class="muted num">{bytes(d.total_bytes)} · {d.filesystem || 'formato desconhecido'} · ainda não faz parte do acervo</p>
-          {#if app.readonly}
-            <p class="lock small"><Icon name="lock" size={14} /> Adicione HDs novos quando estiver em casa.</p>
-          {:else if d.filesystem.toLowerCase() === 'exfat'}
+          {#if d.filesystem.toLowerCase() === 'exfat'}
             <div class="acts">
               <button class="btn small" disabled={adding === d.mount_path} onclick={() => add(d)}>
                 <Icon name="plus" size={15} /> {adding === d.mount_path ? 'Preparando…' : 'Adicionar como novo volume'}
@@ -108,7 +120,7 @@
             </div>
           {:else}
             <p class="warn small">
-              Precisa estar em exFAT para abrir em qualquer computador. Formate em exFAT (no Mac pelo Utilitário de Disco; no Windows, botão direito no disco › Formatar). Isso apaga o HD; depois conecte de novo.
+              Precisa estar em exFAT para abrir em qualquer computador. Formate em exFAT (no Mac pelo Utilitário de Disco; no Windows, botão direito no disco › Formatar). Isso apaga tudo o que houver nele; depois conecte de novo. <a href="#/ajuda/preparar-armazenamento">Passo a passo</a>
             </p>
           {/if}
         {/if}
@@ -128,11 +140,11 @@
           </div>
           <div class="bar"><span style:width="{tPct}%"></span></div>
           <p class="faint small path">{t.files[t.index]?.rel_path}</p>
-          <p class="faint small">Cada arquivo é copiado, relido do HD e conferido por SHA-256 antes de contar.</p>
+          <p class="faint small">Cada arquivo é copiado, relido do armazenamento e conferido por SHA-256 antes de contar.</p>
         {:else if t.phase === 'committing'}
           <p>Confirmando com o servidor…</p>
         {:else if t.phase === 'bundle'}
-          <p>Gravando catálogo, miniaturas e ABRIR-ACERVO.html no HD…</p>
+          <p>Gravando catálogo, miniaturas e ABRIR-ACERVO.html no armazenamento…</p>
         {:else if t.phase === 'done' || t.phase === 'cancelled'}
           <p class="ok-line">
             <Icon name="check" size={18} />
@@ -141,13 +153,13 @@
             {:else if t.files.length === 0}
               Nada para transferir agora.
             {:else}
-              <span class="num">{plural(t.verified, 'arquivo copiado e conferido', 'arquivos copiados e conferidos')}. {devices.archiveCopies > 1 ? `Os itens saem do servidor quando estiverem em ${devices.archiveCopies} HDs.` : ''}</span>
+              <span class="num">{plural(t.verified, 'arquivo copiado e conferido', 'arquivos copiados e conferidos')}. {devices.archiveCopies > 1 ? `Os itens saem do servidor quando estiverem em ${devices.archiveCopies} armazenamentos.` : ''}</span>
             {/if}
           </p>
           {#if t.phase === 'cancelled'}<p class="muted small">Parado antes do fim. Transfira de novo para continuar; o que já foi conferido não é copiado outra vez.</p>{/if}
         {:else if t.phase === 'failed'}
           <p class="error-text">A transferência parou: {t.error}</p>
-          <p class="muted small">Nada foi apagado do servidor sem conferência. Conecte o HD e transfira de novo para continuar.</p>
+          <p class="muted small">Nada foi apagado do servidor sem conferência. Conecte o armazenamento e transfira de novo para continuar.</p>
         {/if}
         {#if t.rejected.length || t.copyErrors.length}
           <details class="small">
@@ -172,7 +184,7 @@
           </p>
           {#if c.problems.length}
             <ul class="small">{#each c.problems as p}<li>arquivo {p.file_id}: {p.error}</li>{/each}</ul>
-            <p class="muted small">Se os originais ainda estão no servidor ou em outro HD, transfira de novo para refazer as cópias.</p>
+            <p class="muted small">Se os originais ainda estão no servidor ou em outro armazenamento, transfira de novo para refazer as cópias.</p>
           {/if}
         {:else}
           <p class="error-text">A verificação parou: {c.error}</p>
@@ -195,8 +207,26 @@
   .devices {
     max-width: 820px;
   }
-  .page-title {
-    padding-top: var(--sat);
+  .title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: var(--page-top, var(--sat));
+  }
+  .next-batch {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 8px;
+    border-color: rgba(240, 180, 76, 0.35);
+    color: var(--accent);
+  }
+  .next-batch strong {
+    color: var(--text);
+  }
+  .next-batch p {
+    margin: 2px 0 0;
   }
   .sec {
     font-size: 15px;
@@ -281,13 +311,6 @@
   }
   .small {
     font-size: 12.5px;
-  }
-  .lock {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 10px !important;
-    color: var(--info);
   }
   .warn {
     color: var(--warn);

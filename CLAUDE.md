@@ -14,7 +14,7 @@ Não mude nada que toque nestas regras sem aprovação explícita do dono:
 5. Originais nunca são alterados.
 6. Descarte passa 30 dias na lixeira.
 7. Servidor nunca exposto à internet; LAN + Tailscale, sempre com senha.
-8. Todo HD leva um `ABRIR-ACERVO.html` offline.
+8. Todo armazenamento (HD, SSD, pendrive…) leva um `ABRIR-ACERVO.html` offline.
 
 As regras 3, 4 e 6 também são impostas por gatilhos no `catalogo.db`. Se um
 gatilho bloquear algo, conserte o código, não o gatilho.
@@ -24,8 +24,10 @@ gatilho bloquear algo, conserte o código, não o gatilho.
 - `server/acervo/ingest.py` — arquivo recebido → hash → dedupe → metadados → Entrada; `reconcile()` pós-queda
 - `server/acervo/library.py` — manter, descartar, restaurar, purgar (toda movimentação de bytes)
 - `server/acervo/storage.py` — `move_verified`, hash, fsync
-- `server/acervo/jobs.py` — fila em disco: miniaturas, pHash, lugar, texto, OCR; manutenção
-- `server/acervo/api/` — rotas; `archive.py` é o arquivamento em HD, `migration.py` o lado antigo da migração
+- `server/acervo/jobs.py` — fila em disco: miniaturas, pHash, lugar, texto, OCR; manutenção; avisos (push)
+- `server/acervo/library.py` `alerts()` — os avisos do app e das notificações (mesmos textos)
+- `web/src/lib/help.ts` — tutoriais da Ajuda (`#/ajuda`); atualize quando mudar um fluxo
+- `server/acervo/api/` — rotas; `archive.py` é o arquivamento em armazenamento externo, `migration.py` o lado antigo da migração
 - `server/acervo/migrate.py` — `acervo migrar` (lado novo); `push.py` — avisos (RFC 8291 + VAPID)
 - `scripts/linux/` — instalador do mini PC (systemd); `docs/migrar.md` — tutorial de mudança
 - `web/` — Svelte; `mac/` — Tauri; `scripts/termux/` — Realme

@@ -90,7 +90,7 @@ do Mac aceitam sem instalar nada:
 
 - **casa** (ex.: `https://fulano-casa.duckdns.org:8765`) aponta para o IP do celular no Wi-Fi;
 - **fora** (ex.: `https://fulano.duckdns.org:8765`) aponta para o IP dele no Tailscale.
-  Por ele o Acervo fica em **modo seguro** (não apaga nem mexe em HDs).
+  Por ele o Acervo funciona igual a dentro de casa, sempre com senha.
 
 O servidor descobre os dois IPs sozinho a cada 10 minutos e atualiza o DuckDNS se
 mudarem; o certificado é renovado antes de vencer. Nenhuma porta fica aberta para a
@@ -100,77 +100,40 @@ internet (regra 7). Para isso funcionar, deixe o **Tailscale ligado** no celular
 Os nomes ficam num registro público de certificados (como todo site com HTTPS),
 mas só levam a endereços da sua casa e do seu Tailscale. Não use seu nome completo neles.
 
-## 6. Cartão microSD — onde fica o que já foi triado
+## 6. Onde ficam os arquivos (e o cartão microSD antigo)
 
 O caminho de cada arquivo:
 
 ```
-iPhone/Mac ──► Entrada (memória interna, até 100 GB) ──triagem──► Acervo (cartão microSD) ──lote──► HD
+iPhone/Mac ──► Entrada ──triagem──► Acervo ──lote (app do computador)──► armazenamento
+               └──────── memória interna do celular ────────┘           (HD, SSD, pendrive…)
 ```
 
-- **Entrada** fica na memória interna, que é rápida. Passou de `inbox_max_gb`
-  (100 GB), o servidor recusa novos envios até você fazer a triagem.
-- **Manter** é instantâneo. Logo depois, uma tarefa de fundo copia o item para
-  o cartão, relê a cópia, confere o SHA-256 e só então apaga a interna.
-  `acervo-ctl status` mostra quanto ainda está copiando.
-- Quando o cartão passa de 80%, a barra de espaço avisa: é hora de passar um
-  lote para o HD pelo app do Mac. O lote sai do cartão e libera espaço.
-- Se o cartão estiver cheio ou fora do celular, o que você mantiver fica na
-  memória interna e vai para o cartão sozinho quando houver espaço.
+- **Entrada** e **Acervo** ficam na memória interna até o lote. Por padrão a
+  Entrada não tem limite (`inbox_max_gb = 0`): os envios só param se o disco acabar.
+- Até o lote, esses arquivos **só existem no celular**. Por isso o Acervo avisa
+  (faixa no app e notificação): **lote pronto** com 5 GB (`archive_batch_gb`) ou
+  com algo mantido há **14 dias** (`archive_alert_days`); **pouco espaço** acima de
+  80% (`storage_alert_pct`); **Entrada esperando** com 7 dias ou 5 GB
+  (`inbox_alert_days`, `inbox_alert_gb`).
+- A cópia diária do catálogo (`catalog_backup_dir`, que o `instalar.sh` oferece)
+  guarda datas, lugares e em que armazenamento está cada coisa.
 
-**Se o celular se perder**, o cartão tem tudo o que já passou pela triagem e
-ainda não foi para um HD, em pastas comuns (`acervo/AAAA/MM/fotos`…). Num
-computador, abra o **`ABRIR-ACERVO.html`** do cartão: ele mostra as fotos com
-miniaturas, por mês, com busca, sem instalar nada — igual ao dos HDs. Há também
-uma cópia diária do catálogo e um `LEIA-ME.txt` em `acervo-resgate/`.
+### Cartão microSD antigo (aposentado em 01/11/2026)
 
-O que ainda estava na **Entrada** (sem triagem) estava só no celular. Por isso o
-Acervo avisa quando algo fica na Entrada há mais de **7 dias** ou quando ela passa
-de **5 GB** (`inbox_alert_days` e `inbox_alert_gb`).
+O cartão deixou de ser memória de transição: nada novo vai para ele, e a opção
+`sd_for_library` não existe mais (se sobrou no `acervo.toml`, é ignorada).
 
-### Saúde do cartão
+Se o seu `acervo.toml` ainda tem `sd_dir`, **deixe o cartão no celular**: o que
+estava nele volta sozinho para a memória interna, aos poucos, com cada cópia
+relida e conferida por SHA-256 antes de apagar a do cartão. Se faltar espaço na
+memória interna, esses itens saem direto do cartão no próximo lote para um
+armazenamento. `acervo-ctl status` mostra quanto ainda está no cartão; tirar o
+cartão antes da hora faz aparecer o aviso “Cartão microSD não encontrado”.
 
-Todo dia o Acervo relê uma fatia do cartão e confere o SHA-256 de cada arquivo,
-começando pelos conferidos há mais tempo; em 30 dias o cartão inteiro passa pela
-verificação. Se um arquivo não conferir:
-
-- aparece um aviso vermelho no Acervo (e uma notificação, se ligada);
-- se a foto ainda estiver no iPhone, o **próximo backup diário a recupera sozinho**:
-  por 3 dias, o servidor pede ao atalho que volte até a data da foto estragada
-  (esses backups mandam mais fotos antigas que o normal; as repetidas são
-  reconhecidas pelo hash e não ocupam espaço). Fotos que já saíram do iPhone
-  ("Esvaziar iPhone") só voltam de um HD ou de outra cópia sua;
-- a cópia estragada vai para `corrompidos/` no cartão (nunca é apagada);
-- mais de um arquivo com defeito costuma ser o cartão morrendo: troque-o e
-  mande um lote para o HD o quanto antes.
-
-`acervo-ctl status` mostra quanto do cartão foi conferido nos últimos 30 dias.
-
-### Antes de usar
-
-- Cartão **de marca** (SanDisk, Samsung, Kingston), classe **A1/A2, U3**. O Realme 9
-  aceita até 256 GB. Cartões falsificados mentem o tamanho e corrompem arquivos.
-- Configure como **armazenamento portátil** (exFAT). **Nunca** use "formatar como
-  memória interna": o cartão fica criptografado e ilegível em qualquer outro aparelho,
-  o que acaba com a ideia de resgate.
-- O cartão é **uma cópia só**. Mande lotes para o HD com frequência; não espere encher.
-
-### Ligar
-
-O `instalar.sh` pergunta se deve usar o cartão e configura tudo. Para fazer à mão:
-
-1. Rode `termux-setup-storage`.
-2. Descubra o caminho: `readlink -f ~/storage/external-1` (algo como
-   `/storage/XXXX-XXXX/Android/data/com.termux/files`).
-3. No `~/acervo/acervo.toml`, acrescente:
-   ```toml
-   sd_dir = "/storage/XXXX-XXXX/Android/data/com.termux/files/acervo"
-   sd_for_library = true
-   ```
-4. `acervo-ctl restart`. O que já estava no Acervo começa a ir para o cartão.
-
-Atenção: o Android apaga essa pasta do cartão se o Termux for desinstalado
-(mais um motivo para nunca desinstalar).
+Quando não sobrar nada no cartão, apague a linha `sd_dir` do `~/acervo/acervo.toml`
+e rode `acervo-ctl restart`. Depois o cartão pode ser formatado e usado para
+outra coisa.
 
 ## 7. Temperatura
 

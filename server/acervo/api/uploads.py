@@ -42,7 +42,7 @@ def _uploads_dir(request: Request) -> Path:
 def _check_space(request: Request, length: int) -> None:
     cfg = request.app.state.config
     if disk_usage(cfg.data_dir).free_bytes < length + SPACE_MARGIN:
-        raise HTTPException(507, "Sem espaço no servidor. Transfira um lote para um HD.")
+        raise HTTPException(507, "Sem espaço no servidor. Transfira um lote para um armazenamento.")
     if cfg.inbox_max_gb:
         conn = _conn(request)
         try:

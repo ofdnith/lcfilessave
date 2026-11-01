@@ -3,7 +3,7 @@
 The server keeps two DuckDNS names pointing at its own private addresses:
 
   home  ->  the phone's Wi-Fi address (192.168.x.x): full mode
-  away  ->  the phone's Tailscale address (100.x.y.z): safe mode (see auth.is_remote)
+  away  ->  the phone's Tailscale address (100.x.y.z): same features as at home
 
 Nothing is exposed to the internet (inviolable rule 7): the names only resolve to
 private addresses, and the certificate comes through the DNS-01 challenge, so no

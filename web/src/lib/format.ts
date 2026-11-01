@@ -124,10 +124,10 @@ export function eta(seconds: number): string {
 }
 
 export function weeksText(w: number): string {
-  if (w < 1) return 'faltam poucos dias para o próximo HD';
-  if (w < 8) return `faltam ~${plural(Math.round(w), 'semana', 'semanas')} para o próximo HD`;
-  if (w < 104) return `faltam ~${plural(Math.round(w / 4.3), 'mês', 'meses')} para o próximo HD`;
-  return 'próximo HD ainda distante';
+  if (w < 1) return 'próximo lote em poucos dias';
+  if (w < 8) return `próximo lote em ~${plural(Math.round(w), 'semana', 'semanas')}`;
+  if (w < 104) return `próximo lote em ~${plural(Math.round(w / 4.3), 'mês', 'meses')}`;
+  return 'próximo lote ainda distante';
 }
 
 export const kindTabs: { key: KindFilter; label: string }[] = [

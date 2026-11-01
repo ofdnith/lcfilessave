@@ -2,13 +2,13 @@
 
 O Acervo não fica preso ao celular. Tudo o que ele sabe está numa pasta só
 (`acervo-dados`): o catálogo, as miniaturas, as prévias, os certificados e os
-originais que ainda não foram para um HD. Mudar de máquina é copiar essa pasta
+originais que ainda não foram para um armazenamento. Mudar de máquina é copiar essa pasta
 **conferindo cada arquivo pelo SHA-256**, e o comando `acervo migrar` faz isso
 sozinho.
 
 O que **não** muda:
 
-- **Os HDs.** Cada um tem o próprio `volume.json` e catálogo; o novo servidor os reconhece.
+- **Os armazenamentos** (HD, SSD, pendrive…). Cada um tem o próprio `volume.json` e catálogo; o novo servidor os reconhece.
 - **A senha e os tokens dos Atalhos.** Estão dentro do catálogo e vão junto.
 - **O certificado que você instalou no iPhone e no Mac.** A autoridade vai junto,
   então ninguém precisa reinstalar nada.
@@ -47,8 +47,8 @@ Sem o endereço seguro, use o nome fixo do Tailscale:
 
 ## 1. Antes: esvaziar o servidor antigo (recomendado)
 
-No app do Mac, transfira um lote para um HD (**Dispositivos → Transferir lote
-para cá**) até sobrar pouca coisa no servidor. O que já está no HD não precisa
+No app do Mac, transfira um lote para um armazenamento (**Dispositivos → Transferir lote
+para cá**) até sobrar pouca coisa no servidor. O que já está num armazenamento não precisa
 ser copiado: só o catálogo, as miniaturas e as prévias (alguns GB) vão pela rede.
 
 Confira também que não há envio em andamento: nada de backup diário rodando
@@ -122,7 +122,7 @@ sozinho quando o mini PC liga) e mostra o endereço.
    fotos recentes e antigas, faça uma busca, veja a Entrada.
 3. Em **Ajustes**, confira que o servidor mostra o nome do mini PC.
 4. Rode o **Backup diário** manualmente no Atalhos e veja chegar na Entrada.
-5. No app do Mac, plugue um HD e veja que ele aparece em **Dispositivos**.
+5. No app do Mac, plugue um armazenamento e veja que ele aparece em **Dispositivos**.
 
 ## 7. Desligar o antigo
 
@@ -170,7 +170,7 @@ Lembre de devolver o nome `acervo` a ele no Tailscale.
    miniaturas, as prévias, os certificados e a base de cidades.
 4. Cada arquivo é gravado como `.part`, recebe `fsync`, tem o **SHA-256
    conferido** e só então é renomeado. Arquivos já presentes e corretos são pulados.
-5. O catálogo é ajustado para a nova máquina: o que estava no microSD do Realme
+5. O catálogo é ajustado para a nova máquina: o que ainda estivesse no microSD antigo do Realme
    passa a ser local, e o congelamento sai da cópia.
 6. Por fim, ele confere que todo original do catálogo existe com o tamanho
    certo, pergunta ao Realme se algo mudou desde a cópia do catálogo (se mudou,

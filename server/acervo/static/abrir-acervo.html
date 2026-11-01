@@ -125,7 +125,7 @@ function render() {
   if (words.length) {
     const elsewhere = others.filter(ok).slice(0, 200);
     if (elsewhere.length) {
-      main.append(Object.assign(document.createElement("h2"), {textContent: "Em outros HDs"}));
+      main.append(Object.assign(document.createElement("h2"), {textContent: "Em outros armazenamentos"}));
       const box = document.createElement("div"); box.className = "others";
       for (const o of elsewhere) {
         const d = document.createElement("div");

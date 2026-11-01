@@ -1,10 +1,12 @@
 # Riscos do plano
 
 Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código.
+Desde 01/11/2026 o destino dos lotes se chama **armazenamento** (HD, SSD, pendrive…);
+onde abaixo diz "HD", vale para qualquer armazenamento.
 
 | # | Risco | Situação |
 |---|---|---|
-| 1 | Um HD só é uma cópia só | Opção `archive_copies = 2` pronta; o padrão é 1 — **decisão do dono** |
+| 1 | Um armazenamento só é uma cópia só | Opção `archive_copies = 2` pronta; o padrão é 1 — **decisão do dono** |
 | 2 | Camada 1 dizer "já tenho" por engano | Resolvido: "seguro apagar" exige hash de cada arquivo |
 | 3 | Descartadas voltando todo dia | Resolvido: estado `purged` guarda o hash |
 | 4 | `pydantic-core` no Termux | Instalador tenta o pacote pronto e, se faltar, compila |
@@ -16,10 +18,10 @@ Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código
 | 10 | Miniaturas crescendo | WebP 400 px (~20 KB); prévias grandes são cache descartável |
 | 11 | HEIC no Termux | `pillow-heif` se instalar; senão a prévia embutida via exiftool |
 | 12 | Bateria sempre na tomada | Checklist do instalador; tarefas pausam acima de `max_temp_c`; OCR leve |
-| 13 | Cartão microSD falhar | Verificação diária (cartão inteiro a cada 30 dias); arquivo com defeito volta pelo backup do iPhone |
+| 13 | O celular guarda a única cópia até o lote | Aviso de lote pronto (5 GB ou 14 dias), aviso de espaço, cópia diária do catálogo; microSD aposentado |
 | 14 | Entrada parada | Só existe no celular; aviso com 7 dias ou 5 GB sem triagem |
 
-## 1. Um único HD é uma única cópia — **decisão do dono**
+## 1. Um único armazenamento é uma única cópia — **decisão do dono**
 
 Depois do arquivamento, o servidor apaga o lote e o original passa a existir em
 **um só HD**. HDs falham (queda, desgaste, setor ruim), e a verificação de
@@ -154,21 +156,21 @@ isso as tarefas de fundo pausam com a bateria a `max_temp_c` (40 °C por padrão
 e só voltam 3 °C abaixo; o OCR lê uma cópia de 1600 px em tons de cinza, com
 um núcleo, em vez do original de 12–48 MP. `acervo-ctl status` mostra a temperatura.
 
-## 13. O cartão microSD é uma cópia só
+## 13. O celular guarda a única cópia até o lote
 
-Com `sd_for_library = true`, o que passa pela triagem sai da memória interna e
-fica **só no cartão** até ir para um HD. Isso protege contra perder o celular,
-mas cartões falham mais que memória interna (desgaste, contato, falsificados).
+Desde 01/11/2026 o cartão microSD não é mais memória de transição: o que passa
+pela triagem fica na memória interna do celular até ir num lote para um
+armazenamento. Até lá, é a única cópia; se o celular se perder ou quebrar, vai junto.
+(Antes, o cartão era essa cópia — e cartões falham mais que memória interna.)
 
-**Tratamento:** a cópia para o cartão relê e confere o SHA-256 antes de apagar
-a interna; o cartão leva uma cópia diária do catálogo (`acervo-resgate/`), um
-`LEIA-ME.txt` e um `ABRIR-ACERVO.html` com miniaturas, que abre em qualquer navegador.
-Todo dia uma fatia do cartão é relida e conferida (o cartão inteiro a cada 30
-dias). Um arquivo com defeito vira aviso e deixa de contar como guardado: se a
-foto ainda estiver no iPhone, o backup diário a manda de novo e o envio a repara;
-a cópia estragada vai para `corrompidos/` no próprio cartão, nunca é apagada. Use cartão de marca (A1/A2, U3) em armazenamento portátil exFAT —
-**nunca** "formatar como memória interna", que o deixa ilegível fora do
-celular — e mande lotes para o HD sem esperar o cartão encher.
+**Tratamento:** lotes pequenos e frequentes. Um aviso (faixa no app e
+notificação) aparece quando o próximo lote chega a `archive_batch_gb` (5 GB) ou
+quando algo mantido está só no servidor há `archive_alert_days` dias (14); outro
+quando a memória passa de `storage_alert_pct` (80%), que fica urgente e diário
+com 95% ou menos de 3 GB livres. A cópia diária do catálogo (`catalog_backup_dir`)
+guarda datas, lugares e em que armazenamento está cada coisa. O que ainda estava
+no cartão volta sozinho para a memória interna, cada cópia conferida por SHA-256
+antes de apagar a do cartão (ou sai direto do cartão no próximo lote, se faltar espaço).
 
 ## 14. A Entrada só existe no celular
 
@@ -177,4 +179,4 @@ perder, isso vai junto.
 
 **Tratamento:** um aviso no topo do Acervo (e notificação, no máximo a cada 3
 dias) quando algo está na Entrada há `inbox_alert_days` dias (7) ou quando ela
-passa de `inbox_alert_gb` (5 GB). Fazer a triagem leva tudo para o cartão.
+passa de `inbox_alert_gb` (5 GB). Depois da triagem, o lote leva tudo para um armazenamento (risco 13).

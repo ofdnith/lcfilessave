@@ -68,10 +68,10 @@ class NewVolume(BaseModel):
     id: str | None = None
 
 
-@router.post("/volumes", dependencies=[Depends(auth.forbid_remote)])
+@router.post("/volumes")
 def create_volume(body: NewVolume, request: Request) -> dict:
     if body.filesystem.lower() != "exfat":
-        raise HTTPException(400, "O HD precisa estar formatado em exFAT.")
+        raise HTTPException(400, "O armazenamento precisa estar formatado em exFAT.")
     vid = body.id or str(uuid.uuid4())
     try:
         uuid.UUID(vid)
@@ -97,7 +97,7 @@ class Seen(BaseModel):
     used_bytes: int | None = Field(None, ge=0)
 
 
-@router.post("/volumes/{volume_id}/seen", dependencies=[Depends(auth.forbid_remote)])
+@router.post("/volumes/{volume_id}/seen")
 def volume_seen(volume_id: str, body: Seen, request: Request) -> dict:
     conn = _conn(request)
     try:
@@ -171,7 +171,7 @@ class Verified(BaseModel):
     copies: list[Copy] = Field(max_length=5000)
 
 
-@router.post("/archive/verified", dependencies=[Depends(auth.forbid_remote)])
+@router.post("/archive/verified")
 def archive_verified(body: Verified, request: Request) -> dict:
     accepted, rejected = [], []
     conn = _conn(request)
@@ -183,7 +183,7 @@ def archive_verified(body: Verified, request: Request) -> dict:
                 if f is None:
                     rejected.append({"file_id": c.file_id, "error": "arquivo desconhecido"})
                 elif c.sha256.lower() != f["sha256"]:
-                    rejected.append({"file_id": c.file_id, "error": "hash da cópia no HD não confere"})
+                    rejected.append({"file_id": c.file_id, "error": "hash da cópia no armazenamento não confere"})
                 elif not _SAFE_REL.match(c.rel_path):
                     rejected.append({"file_id": c.file_id, "error": "caminho inválido"})
                 else:
@@ -195,7 +195,7 @@ def archive_verified(body: Verified, request: Request) -> dict:
                             "last_check_at = excluded.last_check_at, last_check_ok = 1",
                             (c.file_id, body.volume_id, c.rel_path, now_iso(), now_iso()))
                     except sqlite3.IntegrityError:
-                        rejected.append({"file_id": c.file_id, "error": "outro arquivo já ocupa este caminho no HD"})
+                        rejected.append({"file_id": c.file_id, "error": "outro arquivo já ocupa este caminho no armazenamento"})
                         continue
                     log_event(conn, "mac-app", "archive-verify", item_id=f["item_id"], file_id=c.file_id,
                               volume_id=body.volume_id, sha256=f["sha256"], to_path=c.rel_path)
@@ -256,7 +256,7 @@ def _commit(cfg, volume_id: str) -> dict:
     return {"archived_items": archived, "freed_bytes": freed}
 
 
-@router.post("/archive/commit", dependencies=[Depends(auth.forbid_remote)])
+@router.post("/archive/commit")
 async def archive_commit(body: Commit, request: Request) -> dict:
     return await run_in_threadpool(_commit, request.app.state.config, body.volume_id)
 
@@ -323,7 +323,7 @@ class Check(BaseModel):
     checked_file_ids: list[int] = []
 
 
-@router.post("/volumes/{volume_id}/checks", dependencies=[Depends(auth.forbid_remote)])
+@router.post("/volumes/{volume_id}/checks")
 def volume_check(volume_id: str, body: Check, request: Request) -> dict:
     if body.kind not in ("partial", "full"):
         raise HTTPException(400, "kind deve ser partial ou full")
@@ -344,7 +344,7 @@ def volume_check(volume_id: str, body: Check, request: Request) -> dict:
                 conn.execute("UPDATE volumes SET status = 'problem', last_seen_at = ? WHERE id = ?", (now, volume_id))
                 vname = conn.execute("SELECT name FROM volumes WHERE id = ?", (volume_id,)).fetchone()[0]
                 push.notify(request.app.state.config, "hd_problema", f"Problema no {vname}",
-                            f"{len(bad)} arquivo(s) não conferem. Os originais continuam no servidor ou em outro HD; "
+                            f"{len(bad)} arquivo(s) não conferem. Os originais continuam no servidor ou em outro armazenamento; "
                             "faça uma verificação completa.", "/")
             elif body.kind == "full":
                 conn.execute("UPDATE volumes SET last_full_check_at = ?, last_seen_at = ?, "

@@ -49,7 +49,7 @@ def test_archived_items_cannot_be_trashed(api, tmp_path):
     api.act([iid], "keep")
     archive_everything(api, tmp_path / "hd")
     res = api.act([iid], "discard")
-    assert res["failed"] and "HD" in res["failed"][0]["error"]
+    assert res["failed"] and "armazenamento" in res["failed"][0]["error"]
 
 
 def test_thumbnails_and_near_duplicate_suggestion(api, tmp_path):

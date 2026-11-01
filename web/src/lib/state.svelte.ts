@@ -27,10 +27,8 @@ export const app = $state({
   revision: 0,
   /** Focus request counter for the search input (⌘K). */
   searchFocus: 0,
-  /** Away from home over Tailscale (from /api/auth/status). */
+  /** Away from home over Tailscale (from /api/auth/status). Same features as at home. */
   remote: false,
-  /** Safe mode: destructive actions are refused by the server; hide them. */
-  readonly: false,
   /** Server is being migrated: everything that changes data answers 423. */
   migration: false,
 });

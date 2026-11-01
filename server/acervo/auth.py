@@ -175,7 +175,9 @@ def _forwarded(request: Request) -> bool:
 
 
 def is_remote(request: Request) -> bool:
-    """Away from home = the request comes through Tailscale (or another configured network)."""
+    """Away from home = the request comes through Tailscale (or another configured network).
+    Only used to suggest the right address; away from home everything works the same
+    (the restricted "modo seguro" was retired on 01/11/2026)."""
     cfg = request.app.state.config
     try:
         addr = ipaddress.ip_address(client_addr(request))
@@ -184,17 +186,6 @@ def is_remote(request: Request) -> bool:
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:  # '::ffff:100.x.y.z'
         addr = addr.ipv4_mapped
     return any(addr in ipaddress.ip_network(net) for net in cfg.remote_networks)
-
-
-def readonly(request: Request) -> bool:
-    return request.app.state.config.remote_mode == "seguro" and is_remote(request)
-
-
-def forbid_remote(request: Request) -> None:
-    """Dependency for destructive / administrative actions (modo seguro fora de casa)."""
-    if readonly(request):
-        raise HTTPException(status_code=403, detail="Fora de casa o Acervo está em modo seguro: "
-                                                      "apagar e mexer em HDs só pela rede de casa.")
 
 
 MIGRATION_TOKEN_HOURS = 24

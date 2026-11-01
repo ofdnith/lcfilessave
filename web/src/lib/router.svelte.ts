@@ -10,9 +10,10 @@ export type Route =
   | 'esvaziar'
   | 'albuns'
   | 'album'
-  | 'lugares';
+  | 'lugares'
+  | 'ajuda';
 
-const routes: Route[] = ['acervo', 'entrada', 'lixeira', 'enviar', 'ajustes', 'dispositivos', 'esvaziar', 'albuns', 'album', 'lugares'];
+const routes: Route[] = ['acervo', 'entrada', 'lixeira', 'enviar', 'ajustes', 'dispositivos', 'esvaziar', 'albuns', 'album', 'lugares', 'ajuda'];
 
 interface Parsed {
   route: Route;

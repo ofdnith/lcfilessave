@@ -45,9 +45,9 @@ Tokens de longa duração para os Atalhos: `acervo token criar "iPhone"` no serv
 }
 ```
 
-`state`: `inbox` (Entrada), `library` (Acervo), `trash` (Lixeira), `archived` (no HD — aparece
+`state`: `inbox` (Entrada), `library` (Acervo), `trash` (Lixeira), `archived` (num armazenamento — aparece
 no Acervo com o selo `volume.name`). `thumb_url` é `null` enquanto a miniatura não existe.
-`original_url`/`preview_url` são `null` quando o original só está no HD.
+`original_url`/`preview_url` são `null` quando o original só está num armazenamento.
 
 ## Navegar e buscar
 
@@ -61,7 +61,7 @@ no Acervo com o selo `volume.name`). `thumb_url` é `null` enquanto a miniatura 
 | `year`, `month` | filtros | — |
 | `start` | `AAAA-MM`: começa no fim desse mês (rolagem rápida) | — |
 | `important` | `1` | — |
-| `archived` | `1` só no HD, `0` só no servidor | — |
+| `archived` | `1` só em armazenamento, `0` só no servidor | — |
 | `cursor` | valor `next_cursor` da página anterior | — |
 | `limit` | 1–500 | 200 |
 
@@ -72,14 +72,14 @@ Na lixeira a ordem é por `trashed_at`.
 Resposta: `{months: [{year, month, count}]}` do mais recente ao mais antigo.
 
 **`GET /api/items/{id}`** — `Item` + `files: [{id, role, size_bytes, mime, on_server, volumes: ["VOLUME-001"], rel_path, drive_copies: [{volume, rel_path}]}]`
-(`rel_path` = caminho do arquivo no HD do item, para abrir o original com o HD plugado)
+(`rel_path` = caminho do arquivo no armazenamento do item, para abrir o original com ele conectado)
 + `suggestions: [{id, kind}]`.
 
 **`GET /api/items/{id}/thumb`** — WebP 320 px. 404 se ainda não existe.
 **`GET /api/items/{id}/preview`** — imagem que o navegador mostra (JPEG/PNG/WebP/GIF originais
 são servidos direto; HEIC e outros viram JPEG 1600 px). Para vídeo, o próprio vídeo (com Range).
 **`GET /api/items/{id}/original?role=original|live-video`** — o arquivo original, com Range.
-410 `{error, volume}` se só existe no HD.
+410 `{error, volume}` se só existe num armazenamento.
 
 **`GET /api/stats`**
 
@@ -92,27 +92,29 @@ são servidos direto; HEIC e outros viram JPEG 1600 px). Para vídeo, o próprio
     "server_bytes": 62000000000, "budget_bytes": 80000000000,
     "disk_total_bytes": 0, "disk_free_bytes": 0, "used_pct": 62.0, "alert": false,
     "weeks_to_next_drive": 2.1,  // null se desconhecido ou acima de 2 anos
-    "inbox_bytes": 41000000000, "inbox_max_bytes": 100000000000,  // null = sem limite
+    "inbox_bytes": 41000000000, "inbox_max_bytes": null,  // null = sem limite (padrão desde 01/11/2026)
     "inbox_alert": false,        // Entrada passou de 90% do limite
     "inbox_oldest_at": "…", "inbox_waiting_days": 9,
     "inbox_reminder": {"reasons": ["dias", "tamanho"], "days": 9, "bytes": 6200000000},
                                  // null, ou: há item na Entrada há inbox_alert_days dias / passou de inbox_alert_gb
-    "sd": {                      // null se não há sd_dir
-      "present": true, "for_library": true,
-      "total_bytes": 0, "free_bytes": 0, "used_pct": 71.0,
-      "library_bytes": 0,        // Acervo que já está no cartão
-      "pending_bytes": 0,        // Acervo ainda só na memória interna (sendo copiado)
-      "alert": false,            // cartão ausente ou acima de storage_alert_pct: hora de um lote para o HD
-      "health": {                // verificação diária (o cartão inteiro a cada 30 dias)
-        "damaged": 0, "damaged_names": [],      // até 5 nomes
-        "checked_recent_pct": 100.0,            // % do cartão conferido nos últimos 30 dias
-        "last_check_at": "…"
-      }
-    }
+    "batch": {"bytes": 3100000000, "oldest_days": 9},
+                                 // itens mantidos (Acervo) cujo original ainda só está no servidor: o próximo lote
+    "card": null                 // cartão microSD aposentado (01/11/2026): {present, library_bytes}
+                                 // só enquanto ainda há itens do Acervo nele (voltam sozinhos)
   },
-  "daily_backup": {"last_at": "…", "overdue": false}
+  "daily_backup": {"last_at": "…", "overdue": false},
+  "alerts": [                    // o que fazer, do mais urgente; os mesmos textos vão como notificação
+    {"id": "lote", "level": "warn", "title": "Lote pronto para o armazenamento",
+     "text": "3,1 GB do Acervo, o mais antigo há 15 dias, só existem no celular. …", "href": "/#/dispositivos"}
+  ]
 }
 ```
+
+Avisos (`alerts[].id`): `espaco` (memória do celular acima de `storage_alert_pct`; `danger`
+com 95% ou menos de 3 GB livres), `lote` (próximo lote passou de `archive_batch_gb` ou tem item
+mantido há `archive_alert_days` dias), `entrada` (lembrete de triagem), `backup_atrasado`
+(mais de 48 h) e `cartao` (`danger`: itens ainda no cartão antigo e o cartão fora do celular).
+`level`: `danger` | `warn` | `info`. `href` aponta para a tela onde se resolve (ou para `/#/ajuda/…`).
 
 ## Triagem
 
@@ -125,7 +127,7 @@ são servidos direto; HEIC e outros viram JPEG 1600 px). Para vídeo, o próprio
 | `restore` | Lixeira → estado anterior |
 | `important` / `unimportant` | marca/desmarca |
 
-Resposta: `{ok: [ids], failed: [{id, error}]}`. Itens no HD não podem ir para a lixeira.
+Resposta: `{ok: [ids], failed: [{id, error}]}`. Itens num armazenamento não podem ir para a lixeira.
 
 **`POST /api/trash/purge-expired`** → `{purged: int}` (também roda sozinho uma vez por dia).
 
@@ -220,8 +222,8 @@ Se `sha256` vier e não bater com o recebido: `failed` (arquivo corrompido no ca
 | POST | `/api/volumes/{id}/seen` | `{used_bytes?}` | `Volume` |
 | GET | `/api/archive/plan?volume_id=…&max_bytes=…` | — | `{files: [PlanFile], total_bytes}` |
 | GET | `/api/files/{file_id}/content` | — | bytes do original (404 se já saiu do servidor) |
-| GET | `/api/volumes/{id}/catalog.db` | — | catálogo só deste HD (usado pelo bundle) |
-| GET | `/api/volumes/{id}/abrir.html` | — | `ABRIR-ACERVO.html` deste HD (usado pelo bundle) |
+| GET | `/api/volumes/{id}/catalog.db` | — | catálogo só deste armazenamento (usado pelo bundle) |
+| GET | `/api/volumes/{id}/abrir.html` | — | `ABRIR-ACERVO.html` deste armazenamento (usado pelo bundle) |
 | POST | `/api/archive/verified` | `{volume_id, copies: [{file_id, rel_path, sha256}]}` | `{accepted: [ids], rejected: [{file_id, error}]}` |
 | POST | `/api/archive/commit` | `{volume_id}` | `{archived_items, freed_bytes}` |
 | GET | `/api/volumes/{id}/bundle` | — | `{files: [{path, url}]}` |
@@ -241,26 +243,26 @@ PlanFile = {"file_id": 1, "item_id": 1, "sha256": "…", "size_bytes": 0,
 Fluxo da transferência:
 
 1. `GET /api/archive/plan` → lista do lote (até `archive_batch_gb`).
-2. Para cada arquivo: baixar para `rel_path.part` no HD, `fsync`, renomear, **reler do HD**
+2. Para cada arquivo: baixar para `rel_path.part` no armazenamento, `fsync`, renomear, **reler do armazenamento**
    e calcular o SHA-256.
 3. `POST /api/archive/verified` com o hash relido. O servidor só aceita se bater.
 4. `POST /api/archive/commit`: itens com todos os arquivos verificados em
    `archive_copies` HDs viram `archived` e saem do servidor. O banco recusa o contrário.
-5. `GET /api/volumes/{id}/bundle` e gravar cada arquivo no HD
+5. `GET /api/volumes/{id}/bundle` e gravar cada arquivo no armazenamento
    (`.acervo/catalogo.db`, `.acervo/miniaturas/…`, `ABRIR-ACERVO.html`).
 
-`.acervo/volume.json` no HD: `{"id": "uuid", "name": "VOLUME-001", "created_at": "…", "acervo": 1}`.
+`.acervo/volume.json` no armazenamento: `{"id": "uuid", "name": "VOLUME-001", "created_at": "…", "acervo": 1}`.
 
 ## Outros
 
 - `GET /api/health` — sem login. Estado do servidor, catálogo e disco; `storage` traz os mesmos
-  campos de Entrada e cartão de `/api/stats`, e `thermal` = `{temperature, max_temp_c, paused}`.
+  campos de Entrada, lote e cartão de `/api/stats`, e `thermal` = `{temperature, max_temp_c, paused}`.
   `service` = `"acervo"` (é como o app do computador reconhece um Acervo ao procurar na rede) e
   `addresses` = `{home, away}`: os endereços seguros (DuckDNS + Let's Encrypt) que já têm
   certificado, ou `null`; `remote` = `true` quando o pedido chegou pelo Tailscale (a interface
   sugere o endereço de fora em vez do de casa).
 - `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version, battery,
-  inbox_max_gb, sd_for_library, thermal}`.
+  inbox_max_gb, storage_alert_pct, thermal}`.
 - `GET /ca.crt` — certificado para instalar no iPhone/Mac quando se usa o HTTPS próprio (sem endereço seguro).
 
 ---
@@ -272,7 +274,7 @@ Tudo abaixo soma-se ao que está acima; nada mudou de forma incompatível.
 ## Prévia média (fica para sempre)
 
 Toda foto e vídeo ganha uma prévia WebP de até 1024 px (~100 KB), gerada junto com a
-miniatura e **guardada mesmo depois que o original vai para o HD**.
+miniatura e **guardada mesmo depois que o original vai para o armazenamento**.
 
 - `Item.medium_url`: `/api/items/{id}/medium` ou `null` (ainda não gerada / tipo sem imagem).
 - `GET /api/items/{id}/medium` → `image/webp`. 404 se não existe.
@@ -323,14 +325,14 @@ mostram o que está na Entrada, no Acervo e nos HDs (o que está na lixeira não
 
 - `GET /api/tokens` → `{tokens: [{id, label, created_at, last_used_at}]}`
 - `POST /api/tokens` `{label}` → `{id, token}` (o token só aparece nessa resposta); 409 se o
-  servidor ainda não tem senha ("Defina uma senha…"), 403 fora de casa no modo seguro
+  servidor ainda não tem senha ("Defina uma senha…")
 - `DELETE /api/tokens/{id}` → `{ok}`
 - `GET /api/shortcuts` → `{links: {manual: url|null, daily: url|null}}` — links do iCloud
   dos atalhos prontos, configurados no `acervo.toml` (`shortcut_manual_url`, `shortcut_daily_url`).
 
 Backup diário simplificado (o atalho fica com 4 ações):
 - `GET /api/daily` agora também traz `since` (ISO: último backup menos 1 dia, ou 7 dias atrás)
-  e `repairing`: `true` quando `since` voltou até uma foto do iPhone cuja cópia no cartão falhou
+  e `repairing`: `true` quando `since` voltou até uma foto do iPhone cuja cópia no servidor falhou
   na verificação (por até 3 dias), para o backup reenviá-la e o envio consertar a cópia.
 - `POST /api/upload?source=iphone-daily` **sem** `session_id` → entra sozinho na sessão
   diária de hoje (criada na primeira foto).
@@ -346,26 +348,25 @@ Só funciona no web app instalado na tela de início (iOS 16.4+) e com HTTPS.
 - `POST /api/push/unsubscribe` `{endpoint}` → `{ok}`
 - `GET /api/push/status?endpoint=…` → `{subscribed, topics}`
 - `POST /api/push/test` `{endpoint}` → `{ok}` (manda "Avisos do Acervo funcionando")
-- Tópicos: `backup_atrasado` (passou de 48 h), `espaco` (passou do alerta),
-  `hd_problema` (verificação achou erro), `backup_concluido` (resumo do backup diário).
+- Tópicos: `backup_atrasado` (passou de 48 h), `espaco` (pouco espaço no celular), `lote` (lote
+  pronto para o armazenamento), `hd_problema` (verificação de um armazenamento achou erro; o nome
+  ficou), `backup_concluido` (resumo do backup diário), `entrada` (Entrada esperando triagem).
+  Os avisos saem de `alerts` (acima), cada um no máximo a cada 3 dias (todo dia se for `danger`
+  ou `backup_atrasado`). O tópico `cartao` saiu em 01/11/2026: a migração 7 troca por `lote`.
 - Payload que chega no service worker: `{title, body, url}` — abrir `url` ao tocar.
 
-## Fora de casa: modo seguro
+## Fora de casa
 
 Pedidos que chegam pelo Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48) contam como
-"fora de casa". Com `remote_mode = "seguro"` (padrão), fora de casa é proibido:
-descartar, esvaziar lixeira, arquivar em HD (`/api/archive/*`, criar/verificar volume),
-criar/revogar tokens e migração. Ver, buscar, baixar, enviar, manter, marcar importante e
-álbuns continuam liberados. Bloqueado → 403 `{detail}` em português.
-
-`GET /api/auth/status` traz também `{remote: bool, readonly: bool}` — com `readonly`, a
-interface esconde os botões proibidos e mostra "Fora de casa · modo seguro".
+"fora de casa" e funcionam igual aos de casa, sempre com senha. O modo seguro
+(`remote_mode`) saiu em 01/11/2026; um `acervo.toml` antigo com essa linha continua
+funcionando (a opção é ignorada). `GET /api/auth/status` traz `{remote: bool}`, usado só para
+sugerir o endereço certo.
 
 ## Migração (servidor antigo → servidor novo)
 
 Usado pelo comando `acervo migrar` no servidor novo. Só abre com um **token de migração**
-(`acervo-ctl token migracao`): vale 24 horas, só funciona na rede de casa (nunca pelo
-Tailscale) e não abre nenhuma outra rota — e nenhum outro token abre estas.
+(`acervo-ctl token migracao`): vale 24 horas e não abre nenhuma outra rota — e nenhum outro token abre estas.
 
 | Método | Rota | Resposta |
 |---|---|---|

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpLink from './HelpLink.svelte';
   // Ajustes → Configurar iPhone: server address, Shortcuts tokens and install links.
   import Icon from './Icon.svelte';
   import { api, ApiError } from '../lib/api';
@@ -80,6 +81,7 @@
 
 <section class="panel">
   <h2>Configurar iPhone</h2>
+  <p class="help-line"><HelpLink slug="backup-diario" label="Passo a passo do backup diário" /></p>
   <p class="muted">Os atalhos do app Atalhos precisam do endereço do servidor e de um token.</p>
 
   <div class="field">
@@ -101,10 +103,8 @@
     </div>
   {:else if !passwordSet}
     <p class="lockline"><Icon name="lock" size={14} /> Defina uma senha no servidor antes (comando <code>acervo senha</code>); os tokens só existem com senha.</p>
-  {:else if !app.readonly}
-    <button class="btn small" onclick={create} disabled={busy}><Icon name="key" size={15} /> Criar token para os Atalhos</button>
   {:else}
-    <p class="lockline"><Icon name="lock" size={14} /> Crie e revogue tokens quando estiver em casa.</p>
+    <button class="btn small" onclick={create} disabled={busy}><Icon name="key" size={15} /> Criar token para os Atalhos</button>
   {/if}
 
   {#if links && (links.manual || links.daily)}
@@ -127,7 +127,7 @@
             <span class="tname">{t.label}</span>
             <span class="faint small">criado em {utcDate(t.created_at)} · {t.last_used_at ? `usado ${ago(t.last_used_at)}` : 'nunca usado'}</span>
           </span>
-          {#if !app.readonly}<button class="btn small ghost" onclick={() => revoke(t)}>Revogar</button>{/if}
+          <button class="btn small ghost" onclick={() => revoke(t)}>Revogar</button>
         </li>
       {/each}
     </ul>
@@ -135,6 +135,9 @@
 </section>
 
 <style>
+  .help-line {
+    margin: -4px 0 10px;
+  }
   h2 {
     font-size: 16px;
     margin-bottom: 6px;

@@ -76,23 +76,10 @@ storage_access() {
   STORAGE_OK=1
 }
 BACKUP_DIR=""
-SD_DIR=""
 if [[ ! -f "$CONF" ]]; then
 if ask "Guardar uma cópia diária do catálogo na memória compartilhada (recomendado)?"; then
   storage_access
   BACKUP_DIR="$HOME/storage/shared/Acervo-copia-do-catalogo"
-fi
-if ask "Usar o cartão microSD para guardar tudo o que passar pela triagem (recomendado se houver cartão)?"; then
-  storage_access
-  if [[ -d "$HOME/storage/external-1" ]]; then
-    SD_DIR="$(readlink -f "$HOME/storage/external-1")/acervo"
-    mkdir -p "$SD_DIR" && ok "cartão: $SD_DIR"
-    warn "O cartão precisa estar como ARMAZENAMENTO PORTÁTIL (exFAT), nunca formatado como memória interna."
-  else
-    warn "Cartão não encontrado (~/storage/external-1). Depois de colocar o cartão: rode"
-    warn "mkdir -p ~/storage/external-1/acervo, acrescente ao $CONF a linha"
-    warn "sd_dir = \"$HOME/storage/external-1/acervo\"  e rode:  acervo-ctl restart"
-  fi
 fi
   read -r -p "  Seu e-mail (só vai junto dos avisos para o serviço da Apple; Enter para pular): " EMAIL
   {
@@ -104,11 +91,7 @@ fi
     echo "https = true"
     [[ -n "$IP" ]] && echo "tls_names = [\"$IP\"]"
     [[ -n "$BACKUP_DIR" ]] && echo "catalog_backup_dir = \"$BACKUP_DIR\""
-    if [[ -n "$SD_DIR" ]]; then
-      echo "sd_dir = \"$SD_DIR\""
-      echo "sd_for_library = true"
-    fi
-    echo "inbox_max_gb = 100"
+    echo "inbox_max_gb = 0"
     echo "inbox_alert_days = 7"
     echo "inbox_alert_gb = 5"
     echo "max_temp_c = 40"

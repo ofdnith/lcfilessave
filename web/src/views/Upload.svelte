@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpLink from '../components/HelpLink.svelte';
   import Icon from '../components/Icon.svelte';
   import { bytes, eta, num, plural } from '../lib/format';
   import { href } from '../lib/router.svelte';
@@ -73,7 +74,7 @@
   ondrop={drop}
 >
   <h1 class="page-title">Enviar</h1>
-  <p class="page-sub">Os arquivos vão para a Entrada. O que já existe no acervo é pulado sem gastar internet.</p>
+  <p class="page-sub">Os arquivos vão para a Entrada. O que já existe no acervo é pulado sem gastar internet. <HelpLink slug="enviar" label="Outras formas de enviar" /></p>
 
   <button class="drop" class:over onclick={() => picker?.click()}>
     <span class="drop-icon"><Icon name="upload" size={30} /></span>

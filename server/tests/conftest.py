@@ -168,8 +168,20 @@ def insert_file(conn: sqlite3.Connection, item_id: int, sha: str = SHA_A, rel_pa
 
 @pytest.fixture
 def sd_api(tmp_path: Path):
+    """A server that still has the retired microSD card (sd_dir) mounted."""
     (tmp_path / "sd").mkdir()
     cfg = Config(data_dir=tmp_path / "dados", workers=False, web_dir=tmp_path / "sem-web",
-                 sd_dir=tmp_path / "sd", sd_for_library=True)
+                 sd_dir=tmp_path / "sd")
     with TestClient(create_app(cfg)) as client:
         yield Api(client, cfg, login(client, cfg))
+
+
+def put_on_card(cfg: Config, item_id: int) -> None:
+    """Recreate the state left by the old card flow (before 01/11/2026): a kept
+    item whose original lives on the microSD, copied there verified."""
+    from acervo import db as _db, library as _library
+    conn = _db.connect(cfg.db_path)
+    try:
+        assert _library._copy_then_switch(cfg, conn, item_id, "sd", "to-sd", "test")
+    finally:
+        conn.close()

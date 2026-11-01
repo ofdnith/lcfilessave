@@ -237,7 +237,7 @@ class Uploader {
       j.message = 'Está na lixeira';
     } else {
       j.result = 'known';
-      j.message = r.state === 'archived' ? 'Já existia (no HD)' : 'Já existia';
+      j.message = r.state === 'archived' ? 'Já existia (num armazenamento)' : 'Já existia';
     }
   }
 

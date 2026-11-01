@@ -1,4 +1,5 @@
 <script lang="ts">
+  import HelpLink from '../components/HelpLink.svelte';
   import { untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import { runAction } from '../lib/actions';
@@ -39,7 +40,7 @@
 <div class="page">
   <h1 class="page-title">Lixeira</h1>
   <p class="page-sub">
-    Itens descartados ficam aqui por 30 dias e depois são apagados de vez, automaticamente.
+    Itens descartados ficam aqui por 30 dias e depois são apagados de vez, automaticamente. <HelpLink slug="lixeira" />
     {#if list.total}<span class="num">{plural(list.total, 'item', 'itens')} · {bytes(totalBytes)}{list.done ? '' : '+'}</span>{/if}
   </p>
 
