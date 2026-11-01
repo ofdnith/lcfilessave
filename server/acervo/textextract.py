@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import zipfile
@@ -80,7 +81,10 @@ def ocr_image(image_path: Path) -> str:
         return ""
     res = subprocess.run(["nice", "-n", "15", "tesseract", str(image_path), "-", "-l", langs, "--psm", "3"]
                          if have("nice") else ["tesseract", str(image_path), "-", "-l", langs],
-                         capture_output=True, timeout=600)
+                         capture_output=True, timeout=600,
+                         # One core: the job runs in the background on a phone that is
+                         # always charging; four OpenMP threads only make it hotter.
+                         env={**os.environ, "OMP_THREAD_LIMIT": "1"})
     text = _clean(res.stdout.decode("utf-8", "replace"))
     # Photos without text produce a few stray characters; keep only real text.
     return text if len(re.findall(r"[^\W\d_]{3,}", text)) >= 3 else ""

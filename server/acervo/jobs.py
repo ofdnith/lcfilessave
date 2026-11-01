@@ -7,7 +7,8 @@ Jobs:
   thumbnail  WebP thumbnail (+ perceptual hash and near-duplicate grouping for photos)
   place      GPS -> city name (offline)
   text       text of documents for search
-  ocr        text in photos (only while charging)
+  ocr        text in photos (only while charging), read from a reduced copy
+While the battery is too hot (max_temp_c) the worker pauses until it cools.
 Maintenance (every 10 minutes): purge expired trash once a day, daily catalog
 backup, WAL checkpoint, cleanup of abandoned uploads and of the preview cache.
 """
@@ -21,11 +22,13 @@ import threading
 import time
 from datetime import date
 
-from . import db, media, power
+from . import db, media, power, sdcard
 from .catalog import get_setting, iso_in, medium_path, now_iso, preview_path, set_setting, thumb_path, transaction
 from .config import Config
 from .ingest import add_suggestion
-from .library import purge_expired, resolve_suggestions
+from .library import (inbox_reminder_text, migrate_to_sd, purge_expired, resolve_suggestions, sd_available,
+                      storage_summary)
+from .neardup import PhashIndex
 from .places import Gazetteer
 from .textextract import extract_text, ocr_image
 
@@ -34,6 +37,26 @@ log = logging.getLogger(__name__)
 NEAR_DUP_DISTANCE = 10
 MAX_ATTEMPTS = 5
 PREVIEW_CACHE_BYTES = 2_000_000_000
+SD_RESCUE_DIR = "acervo-resgate"
+SD_README = """ACERVO — cartão microSD
+
+Este cartão guarda tudo o que já passou pela triagem e ainda não foi para um HD.
+Se o celular se perder, os arquivos continuam aqui:
+
+  acervo/AAAA/MM/fotos, videos, docs, audios, outros   os originais, intactos
+  acervo-resgate/catalogo-AAAA-MM-DD.db                 cópia diária do catálogo
+
+Para ler num computador: tire o cartão, use um leitor e abra a pasta
+Android/data/com.termux/files/acervo. Os arquivos são comuns (JPEG, HEIC, MOV…).
+
+Para voltar a ter o Acervo completo num celular novo: instale o Acervo,
+copie o catálogo mais recente para ~/acervo-dados/catalogo.db, aponte sd_dir
+para esta pasta e rode `acervo-ctl verificar` (o que estava só na Entrada
+vai aparecer como não encontrado).
+
+O que já foi para HD está nos HDs; o que ainda estava na Entrada (sem triagem)
+estava só no celular.
+"""
 
 
 class RetryLater(Exception):
@@ -45,6 +68,8 @@ class Worker:
         self.cfg = cfg
         self.exiftool = exiftool
         self.gazetteer = gazetteer
+        self.thermal = power.ThermalGate(cfg.max_temp_c)
+        self.phashes = PhashIndex()
         self._stop = threading.Event()
         self._wake = threading.Event()
         # Each flag is written only by its own thread; migration waits until both are False.
@@ -63,7 +88,10 @@ class Worker:
 
     def start(self) -> None:
         self.recover()
-        for target, name in ((self._loop, "acervo-jobs"), (self._maintenance_loop, "acervo-maintenance")):
+        loops = [(self._loop, "acervo-jobs"), (self._maintenance_loop, "acervo-maintenance")]
+        if self.cfg.sd_for_library:
+            loops.append((self._sd_loop, "acervo-sd"))
+        for target, name in loops:
             t = threading.Thread(target=target, name=name, daemon=True)
             t.start()
             self._threads.append(t)
@@ -83,6 +111,9 @@ class Worker:
         except (AttributeError, OSError):
             pass
         while not self._stop.is_set():
+            if self.thermal.too_hot():
+                self._stop.wait(timeout=60)
+                continue
             try:
                 did = self.run_once()
             except Exception:
@@ -91,6 +122,22 @@ class Worker:
             if not did:
                 self._wake.wait(timeout=5)
                 self._wake.clear()
+
+    def _sd_loop(self) -> None:
+        """Keeps the microSD in step with the Acervo: whatever was kept in triage
+        is copied there (verified) within minutes. Idle checks once a minute."""
+        try:
+            os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 10)
+        except (AttributeError, OSError):
+            pass
+        while not self._stop.is_set():
+            moved = 0
+            try:
+                moved = migrate_to_sd(self.cfg)
+            except Exception:
+                log.exception("Erro ao copiar para o cartão microSD")
+            if not moved:
+                self._stop.wait(timeout=60)
 
     def _maintenance_loop(self) -> None:
         delay = 30  # first run shortly after start, then every 10 minutes
@@ -187,12 +234,19 @@ class Worker:
                 (medium, phash, im.width, im.height, item_id))
             if phash is not None and item["state"] == "inbox":
                 self._group_near_duplicates(conn, item, phash)
+        if phash is not None:
+            self.phashes.add(item_id, phash)
 
     def _group_near_duplicates(self, conn: sqlite3.Connection, item: sqlite3.Row, phash: int) -> None:
-        near = [r["id"] for r in conn.execute(
-            "SELECT id, phash FROM items WHERE phash IS NOT NULL AND id <> ? "
-            "AND state IN ('inbox', 'library', 'archived')", (item["id"],))
-            if media.hamming(r["phash"], phash) <= NEAR_DUP_DISTANCE]
+        if not self.phashes.loaded:
+            self.phashes.load(conn)
+        candidates = self.phashes.near(phash, NEAR_DUP_DISTANCE, exclude=item["id"])
+        if not candidates:
+            return
+        # The index may hold items that were discarded since; the catalog decides.
+        near = [r[0] for r in conn.execute(
+            f"SELECT id FROM items WHERE id IN ({','.join('?' * len(candidates))}) "
+            "AND state IN ('inbox', 'library', 'archived') ORDER BY id", candidates)]
         if not near:
             return
         marks = ",".join("?" * len(near))
@@ -227,12 +281,15 @@ class Worker:
         item, path = self._source(conn, item_id)
         if path is None:
             return
-        if item["mime"] in ("image/jpeg", "image/png"):
-            text = ocr_image(path)
+        # Never the full-resolution original: a 12-48 MP photo takes tesseract
+        # tens of seconds on the phone. The 1600 px preview keeps text readable.
+        im = media.render_source(path, "photo", item["ext"], self.exiftool)
+        if item["mime"] in ("image/jpeg", "image/png") and max(im.size) <= media.PREVIEW_SIZE:
+            text = ocr_image(path)  # already small (e.g. a screenshot): read it as is
         else:
-            tmp = self.cfg.subdir("tmp") / f"ocr-{item_id}.jpg"
+            tmp = self.cfg.subdir("tmp") / f"ocr-{item_id}.png"
             try:
-                media.write_preview(media.render_source(path, "photo", item["ext"], self.exiftool), tmp)
+                media.write_ocr_image(im, tmp)
                 text = ocr_image(tmp)
             finally:
                 tmp.unlink(missing_ok=True)
@@ -268,12 +325,23 @@ class Worker:
             self._clean_tmp()
             self._notices(conn, today)
             if cfg.catalog_backup_dir is not None and get_setting(conn, "last_backup_date") != today:
-                self._backup_catalog(conn, today)
+                self._backup_catalog(conn, today, cfg.catalog_backup_dir)
                 set_setting(conn, "last_backup_date", today)
+            if cfg.sd_for_library and sd_available(cfg) and get_setting(conn, "last_sd_backup_date") != today:
+                self._backup_to_sd(conn, today)
+                set_setting(conn, "last_sd_backup_date", today)
+            try:
+                sdcard.maintain(cfg, conn, today, notify=self._push)
+            except (OSError, sqlite3.Error):
+                log.exception("Erro na manutenção do cartão microSD")
             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         finally:
             conn.close()
         self._trim_previews()
+
+    def _push(self, topic: str, title: str, body: str, url: str) -> None:
+        from . import push
+        push.notify(self.cfg, topic, title, body, url)
 
     def _notices(self, conn: sqlite3.Connection, today: str) -> None:
         """Push notifications for things the owner should know without opening the app."""
@@ -292,6 +360,11 @@ class Worker:
             set_setting(conn, "notice_space_at", now_iso())
             push.notify(self.cfg, "espaco", "Servidor ficando cheio",
                         f"{server_bytes / 1e9:.0f} GB no servidor. Hora de transferir um lote para um HD.", "/")
+        reminder = storage_summary(self.cfg, conn)["inbox_reminder"]
+        last_inbox = get_setting(conn, "notice_inbox_at")
+        if reminder and (not last_inbox or last_inbox < iso_in(-3)):
+            set_setting(conn, "notice_inbox_at", now_iso())
+            push.notify(self.cfg, "entrada", "Entrada esperando triagem", inbox_reminder_text(reminder), "/#/entrada")
 
     def _backfill_medium(self, conn: sqlite3.Connection) -> None:
         """Items from before medium previews existed: render them, 500 per round."""
@@ -326,9 +399,18 @@ class Worker:
         conn.execute("DELETE FROM uploads WHERE status IN ('receiving', 'cancelled') AND updated_at < ?", (iso_in(-7),))
         conn.execute("DELETE FROM uploads WHERE status IN ('done', 'failed') AND updated_at < ?", (iso_in(-30),))
 
-    def _backup_catalog(self, conn: sqlite3.Connection, today: str) -> None:
-        dest_dir = self.cfg.catalog_backup_dir
-        assert dest_dir is not None
+    def _backup_to_sd(self, conn: sqlite3.Connection, today: str) -> None:
+        """If the phone is lost, the card alone must be enough: the originals are
+        in acervo/AAAA/MM/…, and next to them a copy of the catalog (dates,
+        places, which HD holds what) and a note on how to use it."""
+        folder = self.cfg.sd_dir / SD_RESCUE_DIR
+        try:
+            self._backup_catalog(conn, today, folder, keep=3)
+            (folder / "LEIA-ME.txt").write_text(SD_README, encoding="utf-8")
+        except OSError as exc:
+            log.warning("Não consegui salvar a cópia do catálogo no cartão: %s", exc)
+
+    def _backup_catalog(self, conn: sqlite3.Connection, today: str, dest_dir, keep: int = 7) -> None:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"catalogo-{today}.db"
         target = sqlite3.connect(dest)
@@ -337,7 +419,7 @@ class Worker:
         finally:
             target.close()
         backups = sorted(dest_dir.glob("catalogo-*.db"))
-        for old in backups[:-7]:
+        for old in backups[:-keep]:
             old.unlink(missing_ok=True)
         log.info("Cópia do catálogo salva em %s", dest)
 

@@ -97,6 +97,10 @@ são poucas ações:
    `Authorization`) → **Obter Valor do Dicionário** `summary_text` → **Mostrar
    Notificação** (ex.: "Backup diário: 37 fotos, 4 vídeos").
 
+Normalmente `since` é a data do último backup menos um dia. Se um arquivo do
+cartão microSD falhar na verificação, por 3 dias ele volta até uma hora antes
+da foto estragada, para o atalho mandá-la de novo e o envio consertar a cópia.
+
 O atalho **não tem nenhuma ação de apagar** — e não deve ter (regra 1). Tudo o que
 ele envia cai na **Entrada** (regra 2). Fotos que já estão no Acervo, foram para
 um HD ou foram descartadas são reconhecidas pelo hash e não são guardadas de novo.

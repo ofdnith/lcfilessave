@@ -96,8 +96,32 @@ export interface Stats {
     used_pct: number;
     alert: boolean;
     weeks_to_next_drive: number | null;
+    inbox_bytes: number;
+    inbox_max_bytes: number | null;
+    inbox_alert: boolean;
+    inbox_oldest_at: string | null;
+    inbox_waiting_days: number | null;
+    inbox_reminder: { reasons: ('dias' | 'tamanho')[]; days: number | null; bytes: number } | null;
+    sd: SdStatus | null;
   };
   daily_backup: { last_at: string | null; overdue: boolean };
+}
+
+export interface SdStatus {
+  present: boolean;
+  for_library: boolean;
+  total_bytes: number | null;
+  free_bytes: number | null;
+  used_pct: number | null;
+  library_bytes: number;
+  pending_bytes: number;
+  alert: boolean;
+  health: {
+    damaged: number;
+    damaged_names: string[];
+    checked_recent_pct: number;
+    last_check_at: string | null;
+  };
 }
 
 export type Action = 'keep' | 'discard' | 'restore' | 'important' | 'unimportant';
@@ -273,4 +297,4 @@ export interface ApiToken {
   last_used_at: string | null;
 }
 
-export type PushTopic = 'backup_atrasado' | 'espaco' | 'hd_problema' | 'backup_concluido';
+export type PushTopic = 'backup_atrasado' | 'espaco' | 'hd_problema' | 'backup_concluido' | 'entrada' | 'cartao';

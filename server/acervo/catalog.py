@@ -85,6 +85,21 @@ def drive_rel_path(server_rel_path: str) -> str:
     return "/".join(parts[1:]) if parts[0] in (LIBRARY_DIR, TRASH_DIR) else server_rel_path
 
 
+def inbox_bytes(conn: sqlite3.Connection) -> int:
+    """Bytes waiting for triage (the Entrada), Live Photo videos included."""
+    return conn.execute(
+        "SELECT coalesce(sum(f.size_bytes), 0) FROM files f JOIN items i ON i.id = f.item_id "
+        "WHERE i.state = 'inbox' AND f.rel_path IS NOT NULL").fetchone()[0]
+
+
+def library_bytes_by_root(conn: sqlite3.Connection) -> dict[str, int]:
+    """Bytes of kept items (Acervo) on each storage: {'main': …, 'sd': …}."""
+    rows = conn.execute(
+        "SELECT f.root, coalesce(sum(f.size_bytes), 0) FROM files f JOIN items i ON i.id = f.item_id "
+        "WHERE i.state = 'library' AND f.rel_path IS NOT NULL GROUP BY f.root").fetchall()
+    return {"main": 0, "sd": 0, **{r[0]: r[1] for r in rows}}
+
+
 def abs_path(cfg: Config, root: str, rel_path: str) -> Path:
     return cfg.root_dir(root) / rel_path
 

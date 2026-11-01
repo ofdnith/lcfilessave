@@ -213,6 +213,12 @@ h3 {
   background: var(--danger-soft);
   color: var(--danger);
 }
+a.banner {
+  text-decoration: none;
+}
+a.banner:hover {
+  filter: brightness(0.97);
+}
 
 .sr-only {
   position: absolute;

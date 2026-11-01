@@ -5,6 +5,10 @@ O catálogo é um SQLite com busca FTS5. O SQL fica em
 Na versão 3, uma cópia em HD só conta enquanto estiver saudável: se falhar numa
 verificação de saúde (ou o HD estiver marcado com problema), o servidor volta a
 não poder apagar a cópia dele.
+Na versão 5, `files` ganhou `checked_at` e `check_ok`: a data e o resultado da
+última vez que a cópia no servidor (na prática, no cartão microSD) foi relida e
+conferida pelo SHA-256. Uma cópia com `check_ok = 0` deixa de contar como
+guardada em segurança: o backup diário a manda de novo, e o envio a repara.
 Nomes de tabelas e colunas estão em inglês (regra do projeto); abaixo, a tradução.
 
 ## Princípios

@@ -15,7 +15,9 @@ Ordenados pelo estrago que podem causar. Cada um diz como foi tratado no código
 | 9 | exFAT sem journaling | App do Mac grava `.part`, `fsync`, renomeia e relê o hash |
 | 10 | Miniaturas crescendo | WebP 400 px (~20 KB); prévias grandes são cache descartável |
 | 11 | HEIC no Termux | `pillow-heif` se instalar; senão a prévia embutida via exiftool |
-| 12 | Bateria sempre na tomada | Checklist do instalador; bateria visível em Ajustes |
+| 12 | Bateria sempre na tomada | Checklist do instalador; tarefas pausam acima de `max_temp_c`; OCR leve |
+| 13 | Cartão microSD falhar | Verificação diária (cartão inteiro a cada 30 dias); arquivo com defeito volta pelo backup do iPhone |
+| 14 | Entrada parada | Só existe no celular; aviso com 7 dias ou 5 GB sem triagem |
 
 ## 1. Um único HD é uma única cópia — **decisão do dono**
 
@@ -128,3 +130,33 @@ Um celular carregando 24 h por dia pode inchar a bateria.
 
 **Proposta:** ativar o limite de carga do Realme, se existir; o `instalar.sh`
 lembra disso, e o servidor mostra a temperatura e o nível da bateria (Fase 3).
+
+**Tratamento:** carregando, o OCR rodaria sem parar numa importação grande. Por
+isso as tarefas de fundo pausam com a bateria a `max_temp_c` (40 °C por padrão)
+e só voltam 3 °C abaixo; o OCR lê uma cópia de 1600 px em tons de cinza, com
+um núcleo, em vez do original de 12–48 MP. `acervo-ctl status` mostra a temperatura.
+
+## 13. O cartão microSD é uma cópia só
+
+Com `sd_for_library = true`, o que passa pela triagem sai da memória interna e
+fica **só no cartão** até ir para um HD. Isso protege contra perder o celular,
+mas cartões falham mais que memória interna (desgaste, contato, falsificados).
+
+**Tratamento:** a cópia para o cartão relê e confere o SHA-256 antes de apagar
+a interna; o cartão leva uma cópia diária do catálogo (`acervo-resgate/`), um
+`LEIA-ME.txt` e um `ABRIR-ACERVO.html` com miniaturas, que abre em qualquer navegador.
+Todo dia uma fatia do cartão é relida e conferida (o cartão inteiro a cada 30
+dias). Um arquivo com defeito vira aviso e deixa de contar como guardado: se a
+foto ainda estiver no iPhone, o backup diário a manda de novo e o envio a repara;
+a cópia estragada vai para `corrompidos/` no próprio cartão, nunca é apagada. Use cartão de marca (A1/A2, U3) em armazenamento portátil exFAT —
+**nunca** "formatar como memória interna", que o deixa ilegível fora do
+celular — e mande lotes para o HD sem esperar o cartão encher.
+
+## 14. A Entrada só existe no celular
+
+O que ainda não passou pela triagem está só na memória interna. Se o celular se
+perder, isso vai junto.
+
+**Tratamento:** um aviso no topo do Acervo (e notificação, no máximo a cada 3
+dias) quando algo está na Entrada há `inbox_alert_days` dias (7) ou quando ela
+passa de `inbox_alert_gb` (5 GB). Fazer a triagem leva tudo para o cartão.

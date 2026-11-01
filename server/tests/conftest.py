@@ -164,3 +164,12 @@ def insert_file(conn: sqlite3.Connection, item_id: int, sha: str = SHA_A, rel_pa
         (item_id, role, sha, 1000, "heic", rel_path),
     )
     return cur.lastrowid
+
+
+@pytest.fixture
+def sd_api(tmp_path: Path):
+    (tmp_path / "sd").mkdir()
+    cfg = Config(data_dir=tmp_path / "dados", workers=False, web_dir=tmp_path / "sem-web",
+                 sd_dir=tmp_path / "sd", sd_for_library=True)
+    with TestClient(create_app(cfg)) as client:
+        yield Api(client, cfg, login(client, cfg))

@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 
-from . import db
-from .catalog import free_rel_path, iso_in, library_dir, log_event, now_iso, preview_path, transaction
+from . import db, sdcard
+from .catalog import (free_rel_path, get_setting, inbox_bytes, iso_in, library_bytes_by_root, library_dir, log_event,
+                      now_iso, parse_iso, preview_path, transaction)
 from .config import INBOX_DIR, TRASH_DIR, Config
-from .storage import disk_usage, move_verified
+from .storage import VerificationError, copy_verified, disk_usage, fsync_dir, move_verified
 
 log = logging.getLogger(__name__)
 
@@ -24,13 +27,31 @@ class ActionError(ValueError):
     """Message in Portuguese, shown to the user."""
 
 
+SD_MARGIN_BYTES = 1_000_000_000
+SD_BATCH_BYTES = 2_000_000_000  # per migrate_to_sd() call, so the loop stays responsive
+
+
+def sd_available(cfg: Config) -> bool:
+    return cfg.sd_dir is not None and cfg.sd_dir.is_dir()
+
+
+def sd_has_room(cfg: Config, size: int) -> bool:
+    return sd_available(cfg) and disk_usage(cfg.sd_dir).free_bytes > size * 2 + SD_MARGIN_BYTES
+
+
 def choose_root(cfg: Config, size: int) -> str:
-    """Internal storage unless it is above the alert level and a microSD with room exists."""
-    if cfg.sd_dir is None or not cfg.sd_dir.is_dir():
+    """Where a kept item goes at triage time.
+
+    sd_for_library: internal storage, instantly; migrate_to_sd() then copies it to
+    the microSD in the background (copying in the request would make triage
+    wait on the card). Otherwise: internal storage, and the card only once
+    internal storage passes the alert level.
+    """
+    if cfg.sd_for_library or not sd_available(cfg):
         return "main"
     if disk_usage(cfg.data_dir).used_pct < cfg.storage_alert_pct:
         return "main"
-    return "sd" if disk_usage(cfg.sd_dir).free_bytes > size * 2 + 1_000_000_000 else "main"
+    return "sd" if sd_has_room(cfg, size) else "main"
 
 
 def _files(conn: sqlite3.Connection, item_id: int) -> list[sqlite3.Row]:
@@ -117,6 +138,162 @@ def restore(cfg: Config, conn: sqlite3.Connection, item_id: int, actor: str = "w
             (target, item_id),
         )
         _move_files(cfg, conn, item, root, directory, "restore", actor)
+
+
+class _Changed(Exception):
+    """The item changed (discarded, moved) while its copy was being made."""
+
+
+def _copy_then_switch(cfg: Config, conn: sqlite3.Connection, item_id: int, root: str, action: str,
+                      actor: str) -> bool:
+    """Move an item's files that are not yet on `root` there, across filesystems,
+    without holding the catalog lock during the copy:
+
+      1. copy each file, fsync, re-read the copy and compare SHA-256 (no lock);
+      2. BEGIN; check nothing changed; point the catalog at the copies; COMMIT;
+      3. only then remove the old files.
+
+    Dying after 1: the copies are unrecorded and identical to the recorded
+    originals, so reconcile() deletes them. Dying after 2: the old files are
+    the redundant ones and reconcile() deletes those. Either way, one verified
+    copy is always recorded (rule 3).
+    """
+    item = _item(conn, item_id)
+    files = [f for f in _files(conn, item_id) if f["root"] != root]
+    if not files:
+        return False
+    if any(f["rel_path"] is None for f in files):
+        raise ActionError("O original não está no servidor.")
+    directory = library_dir(item["captured_at"], item["kind"])
+    made: list[tuple[sqlite3.Row, str, Path, Path]] = []
+    try:
+        for f in files:
+            name = f["rel_path"].rsplit("/", 1)[1]
+            new_rel = free_rel_path(conn, cfg, root, directory, name)
+            src, dst = cfg.root_dir(f["root"]) / f["rel_path"], cfg.root_dir(root) / new_rel
+            copy_verified(src, dst, f["sha256"])
+            made.append((f, new_rel, src, dst))
+        with transaction(conn):
+            fresh = _item(conn, item_id)
+            now = {r["id"]: r for r in _files(conn, item_id)}
+            # A migration to a new server froze the catalog while we copied: its
+            # file list has the old paths, so nothing may move now.
+            if get_setting(conn, "migration_active") or fresh["state"] != item["state"] or any(
+                    f["id"] not in now or now[f["id"]]["root"] != f["root"]
+                    or now[f["id"]]["rel_path"] != f["rel_path"] for f, *_ in made):
+                raise _Changed
+            for f, new_rel, _src, _dst in made:
+                # copy_verified just re-read it: this is also a health check.
+                conn.execute("UPDATE files SET rel_path = ?, root = ?, checked_at = ?, check_ok = 1 WHERE id = ?",
+                             (new_rel, root, now_iso(), f["id"]))
+                log_event(conn, actor, action, item_id=item_id, file_id=f["id"], sha256=f["sha256"],
+                          from_path=f"{f['root']}:{f['rel_path']}", to_path=f"{root}:{new_rel}")
+    except BaseException:
+        for *_, dst in made:  # only copies this call created and verified
+            dst.unlink(missing_ok=True)
+        raise
+    for _f, _rel, src, _dst in made:
+        src.unlink(missing_ok=True)
+        fsync_dir(src.parent)
+    return True
+
+
+def migrate_to_sd(cfg: Config, actor: str = "server", max_bytes: int = SD_BATCH_BYTES) -> int:
+    """Copy kept items still on internal storage to the microSD (sd_for_library),
+    verified by SHA-256, then free the internal copy. Returns how many moved.
+
+    Called in a loop by the worker; `max_bytes` bounds one call so the loop
+    stays responsive. Stops at the first card error (removed, full, failing).
+    """
+    if not cfg.sd_for_library or not sd_available(cfg):
+        return 0
+    conn = db.connect(cfg.db_path)
+    moved = done_bytes = 0
+    try:
+        if get_setting(conn, "migration_active"):
+            return 0
+        rows = conn.execute(
+            "SELECT i.id, sum(f.size_bytes) AS size FROM items i JOIN files f ON f.item_id = i.id "
+            "WHERE i.state = 'library' AND f.root = 'main' AND f.rel_path IS NOT NULL "
+            "GROUP BY i.id ORDER BY i.id").fetchall()
+        for row in rows:
+            if done_bytes and done_bytes + row["size"] > max_bytes:
+                break
+            if not sd_has_room(cfg, row["size"]):
+                log.info("Cartão microSD cheio: itens do Acervo continuam na memória interna "
+                         "até um lote ir para o HD")
+                break
+            try:
+                if _copy_then_switch(cfg, conn, row["id"], "sd", "to-sd", actor):
+                    moved += 1
+                    done_bytes += row["size"]
+            except _Changed:
+                continue
+            except (ActionError, OSError, VerificationError) as exc:
+                log.warning("Não consegui copiar o item %s para o cartão: %s", row["id"], exc)
+                break
+    finally:
+        conn.close()
+    if moved:
+        log.info("Cartão microSD: %d itens do Acervo copiados e conferidos", moved)
+    return moved
+
+
+def storage_summary(cfg: Config, conn: sqlite3.Connection) -> dict:
+    """Entrada limit and microSD state, for /api/stats and /api/health."""
+    inbox = inbox_bytes(conn)
+    limit = cfg.inbox_max_gb * 1_000_000_000
+    oldest = conn.execute("SELECT min(uploaded_at) FROM items WHERE state = 'inbox'").fetchone()[0]
+    days = int((datetime.now(timezone.utc) - parse_iso(oldest)).total_seconds() // 86400) if oldest else None
+    reasons = []
+    if cfg.inbox_alert_days and days is not None and days >= cfg.inbox_alert_days:
+        reasons.append("dias")
+    if cfg.inbox_alert_gb and inbox >= cfg.inbox_alert_gb * 1_000_000_000:
+        reasons.append("tamanho")
+    data: dict = {
+        "inbox_bytes": inbox,
+        "inbox_max_bytes": limit or None,
+        "inbox_alert": bool(limit) and inbox >= limit * 0.9,
+        # Reminder to triage (lighter than inbox_alert): what is in the Entrada is
+        # only on the phone, so it should not sit there for long.
+        "inbox_oldest_at": oldest,
+        "inbox_waiting_days": days,
+        "inbox_reminder": {"reasons": reasons, "days": days, "bytes": inbox} if reasons else None,
+        "sd": None,
+    }
+    if cfg.sd_dir is not None:
+        present = sd_available(cfg)
+        usage = disk_usage(cfg.sd_dir) if present else None
+        pending = pending_sd_bytes(conn) if cfg.sd_for_library else 0
+        data["sd"] = {
+            "present": present,
+            "for_library": cfg.sd_for_library,
+            "total_bytes": usage.total_bytes if usage else None,
+            "free_bytes": usage.free_bytes if usage else None,
+            "used_pct": usage.used_pct if usage else None,
+            "library_bytes": library_bytes_by_root(conn)["sd"],
+            "pending_bytes": pending,
+            # Full enough that the next HD batch should come from the card.
+            "alert": (not present) or (usage is not None and usage.used_pct >= cfg.storage_alert_pct),
+            "health": sdcard.health(cfg, conn),
+        }
+    return data
+
+
+def inbox_reminder_text(reminder: dict) -> str:
+    gb = f"{reminder['bytes'] / 1e9:.1f}".replace(".", ",")
+    days = reminder["days"]
+    parts = [f"{gb} GB na Entrada"]
+    if days:
+        parts.append(f"a mais antiga chegou há {days} dia{'s' if days != 1 else ''}")
+    return " · ".join(parts) + ". Até a triagem, isso só existe no celular."
+
+
+def pending_sd_bytes(conn: sqlite3.Connection) -> int:
+    """Kept items that still exist only on internal storage."""
+    return conn.execute(
+        "SELECT coalesce(sum(f.size_bytes), 0) FROM files f JOIN items i ON i.id = f.item_id "
+        "WHERE i.state = 'library' AND f.root = 'main' AND f.rel_path IS NOT NULL").fetchone()[0]
 
 
 def set_important(conn: sqlite3.Connection, item_id: int, value: bool) -> None:

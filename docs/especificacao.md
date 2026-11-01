@@ -195,7 +195,8 @@ Desenvolver e testar primeiro no MacBook; só depois instalar no Realme.
 |---|---|---|
 | Processador | Snapdragon 680, 8 núcleos ARM64 | Trabalho pesado em fila, com baixa prioridade |
 | Memória | 6 ou 8 GB de RAM | Sem Docker, PostgreSQL, Redis; processar em streaming |
-| Armazenamento | 128 GB UFS 2.2 (~100 GB livres) + microSD | Alerta em 80%; lote de arquivamento ~80 GB |
+| Armazenamento | 128 GB UFS 2.2 (~100 GB livres) + microSD | Memória interna só para a Entrada (limite `inbox_max_gb`); o que passa pela triagem vai para o microSD (`sd_for_library`) e do cartão para o HD; alerta em 80% |
+| Temperatura | Celular sempre na tomada; OCR e miniaturas esquentam | Tarefas pausam com a bateria a `max_temp_c` (40 °C) e voltam 3 °C abaixo; OCR sobre cópia de 1600 px, um núcleo |
 | Rede | Wi-Fi 5; USB-C 2.0 | Upload principal pelo Wi-Fi 5 GHz |
 | Sistema | Android 14, Realme UI 5, sem atualizações de segurança | Nunca expor portas; só LAN + Tailscale |
 | Ambiente | Termux (sem root), pela F-Droid | Python nativo; nada que exija glibc ou proot |

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import date as _date
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -421,10 +422,41 @@ def _tab_stats(conn: sqlite3.Connection, states: tuple[str, ...]) -> dict:
     return tabs
 
 
+REPAIR_WINDOW_DAYS = 3
+
+
 def daily_status(conn: sqlite3.Connection) -> dict:
     last = get_setting(conn, "last_daily_backup_at")
     since = iso_in(-1, last) if last else iso_in(-7)
-    return {"last_at": last, "overdue": bool(last and last < iso_in(-2)), "since": since}
+    repair = repair_since(conn)
+    return {"last_at": last, "overdue": bool(last and last < iso_in(-2)),
+            "since": min(since, repair) if repair else since, "repairing": repair is not None}
+
+
+def repair_since(conn: sqlite3.Connection) -> str | None:
+    """A copy on the server failed its health check and the photo came from the
+    iPhone (and was not emptied from it): reach back far enough that the daily
+    backup sends it again — the upload then repairs it. The Shortcut fetches
+    photos created after `since`, oldest first, so starting an hour before the
+    oldest damaged photo puts it among the first ones. Only for a few days after
+    the failure, so a photo no longer on the iPhone does not make every backup
+    re-send hundreds of old photos forever."""
+    rows = conn.execute(
+        "SELECT i.captured_at, i.captured_tz FROM files f JOIN items i ON i.id = f.item_id "
+        "WHERE f.check_ok = 0 AND f.rel_path IS NOT NULL AND f.checked_at >= ? "
+        "AND i.source IN ('iphone-daily', 'iphone-manual')", (iso_in(-REPAIR_WINDOW_DAYS),)).fetchall()
+    stamps = []
+    for r in rows:
+        try:
+            dt = datetime.fromisoformat(r["captured_at"] + (r["captured_tz"] or ""))
+        except ValueError:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.astimezone()  # server's local time, like the iPhone's
+        stamps.append(dt.astimezone(timezone.utc))
+    if not stamps:
+        return None
+    return (min(stamps) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 @router.get("/stats")
@@ -445,6 +477,7 @@ def stats(request: Request) -> dict:
             "inbox_tabs": _tab_stats(conn, ("inbox",)),
             "daily_backup": daily_status(conn),
         }
+        summary = library.storage_summary(cfg, conn)
     finally:
         conn.close()
     usage = disk_usage(cfg.data_dir)
@@ -458,6 +491,7 @@ def stats(request: Request) -> dict:
         "used_pct": usage.used_pct,
         "alert": usage.used_pct >= cfg.storage_alert_pct or server_bytes >= budget,
         "weeks_to_next_drive": _weeks(budget - server_bytes, weekly),
+        **summary,
     }
     return data
 
@@ -484,5 +518,11 @@ def settings(request: Request) -> dict:
     cfg = request.app.state.config
     return {"archive_batch_gb": cfg.archive_batch_gb, "trash_days": cfg.trash_days,
             "archive_copies": cfg.archive_copies, "server_name": cfg.server_name, "version": __version__,
-            "battery": power.battery()}
+            "battery": power.battery(), "inbox_max_gb": cfg.inbox_max_gb,
+            "sd_for_library": cfg.sd_for_library, "thermal": _thermal(request)}
+
+
+def _thermal(request: Request) -> dict | None:
+    worker = getattr(request.app.state, "worker", None)
+    return worker.thermal.status() if worker is not None else None
 

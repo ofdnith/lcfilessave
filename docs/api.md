@@ -91,7 +91,24 @@ são servidos direto; HEIC e outros viram JPEG 1600 px). Para vídeo, o próprio
   "storage": {
     "server_bytes": 62000000000, "budget_bytes": 80000000000,
     "disk_total_bytes": 0, "disk_free_bytes": 0, "used_pct": 62.0, "alert": false,
-    "weeks_to_next_drive": 2.1   // null se desconhecido ou acima de 2 anos
+    "weeks_to_next_drive": 2.1,  // null se desconhecido ou acima de 2 anos
+    "inbox_bytes": 41000000000, "inbox_max_bytes": 100000000000,  // null = sem limite
+    "inbox_alert": false,        // Entrada passou de 90% do limite
+    "inbox_oldest_at": "…", "inbox_waiting_days": 9,
+    "inbox_reminder": {"reasons": ["dias", "tamanho"], "days": 9, "bytes": 6200000000},
+                                 // null, ou: há item na Entrada há inbox_alert_days dias / passou de inbox_alert_gb
+    "sd": {                      // null se não há sd_dir
+      "present": true, "for_library": true,
+      "total_bytes": 0, "free_bytes": 0, "used_pct": 71.0,
+      "library_bytes": 0,        // Acervo que já está no cartão
+      "pending_bytes": 0,        // Acervo ainda só na memória interna (sendo copiado)
+      "alert": false,            // cartão ausente ou acima de storage_alert_pct: hora de um lote para o HD
+      "health": {                // verificação diária (o cartão inteiro a cada 30 dias)
+        "damaged": 0, "damaged_names": [],      // até 5 nomes
+        "checked_recent_pct": 100.0,            // % do cartão conferido nos últimos 30 dias
+        "last_check_at": "…"
+      }
+    }
   },
   "daily_backup": {"last_at": "…", "overdue": false}
 }
@@ -236,8 +253,10 @@ Fluxo da transferência:
 
 ## Outros
 
-- `GET /api/health` — sem login. Estado do servidor, catálogo e disco.
-- `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version}`.
+- `GET /api/health` — sem login. Estado do servidor, catálogo e disco; `storage` traz os mesmos
+  campos de Entrada e cartão de `/api/stats`, e `thermal` = `{temperature, max_temp_c, paused}`.
+- `GET /api/settings` → `{archive_batch_gb, trash_days, archive_copies, server_name, version, battery,
+  inbox_max_gb, sd_for_library, thermal}`.
 - `GET /ca.crt` — certificado para instalar no iPhone/Mac quando o HTTPS próprio está ativo.
 
 ---
@@ -306,7 +325,9 @@ mostram o que está na Entrada, no Acervo e nos HDs (o que está na lixeira não
   dos atalhos prontos, configurados no `acervo.toml` (`shortcut_manual_url`, `shortcut_daily_url`).
 
 Backup diário simplificado (o atalho fica com 4 ações):
-- `GET /api/daily` agora também traz `since` (ISO: último backup menos 1 dia, ou 7 dias atrás).
+- `GET /api/daily` agora também traz `since` (ISO: último backup menos 1 dia, ou 7 dias atrás)
+  e `repairing`: `true` quando `since` voltou até uma foto do iPhone cuja cópia no cartão falhou
+  na verificação (por até 3 dias), para o backup reenviá-la e o envio consertar a cópia.
 - `POST /api/upload?source=iphone-daily` **sem** `session_id` → entra sozinho na sessão
   diária de hoje (criada na primeira foto).
 - `POST /api/daily/finish` → `Session` da sessão de hoje (`summary_text` pronto para a

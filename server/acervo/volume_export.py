@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import sqlite3
 from importlib import resources
@@ -73,7 +74,14 @@ def build_open_html(conn: sqlite3.Connection, volume: sqlite3.Row) -> str:
     others = [[r["kind"], r["original_name"], r["captured_at"], r["vname"]] for r in conn.execute(
         "SELECT i.kind, i.original_name, i.captured_at, v.name AS vname FROM items i JOIN volumes v ON v.id = i.volume_id "
         "WHERE i.state = 'archived' AND i.volume_id <> ? ORDER BY i.captured_at DESC", (volume["id"],))]
-    data = {"volume": volume["name"], "exported_at": now_iso(), "items": items, "others": others}
+    return render_open_html(volume["name"], items, others)
+
+
+def render_open_html(name: str, items: list[list], others: list[list]) -> str:
+    """The offline browser page (an HD or the microSD card). `items` rows:
+    [kind, name, date, rel_path, live_rel_path, sha-if-thumbnail, bytes, place, important];
+    `others`: [kind, name, date, volume name] — what lives on other drives."""
+    data = {"volume": name, "exported_at": now_iso(), "items": items, "others": others}
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     template = resources.files("acervo.static").joinpath("abrir-acervo.html").read_text("utf-8")
-    return template.replace("/*__ACERVO_DATA__*/null", payload).replace("__VOLUME_NAME__", volume["name"])
+    return template.replace("/*__ACERVO_DATA__*/null", payload).replace("__VOLUME_NAME__", html.escape(name))

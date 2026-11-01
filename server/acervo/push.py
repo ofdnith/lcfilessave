@@ -32,7 +32,7 @@ from .config import CERTS_DIR, Config
 
 log = logging.getLogger(__name__)
 
-TOPICS = ("backup_atrasado", "espaco", "hd_problema", "backup_concluido")
+TOPICS = ("backup_atrasado", "espaco", "hd_problema", "backup_concluido", "entrada", "cartao")
 MAX_FAILURES = 10
 
 
