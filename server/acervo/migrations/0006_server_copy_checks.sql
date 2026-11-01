@@ -1,4 +1,4 @@
--- Version 5: health checks of the files kept on the server (mainly the microSD),
+-- Version 6: health checks of the files kept on the server (mainly the microSD),
 -- and two new push-notification topics.
 
 -- Last time this copy was re-read and its SHA-256 compared with the catalog.
