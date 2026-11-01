@@ -25,6 +25,7 @@ export class ItemList {
     this.#query = query;
     this.start = start;
     this.items = [];
+    this.total = 0;
     this.cursor = null;
     this.done = false;
     this.error = null;

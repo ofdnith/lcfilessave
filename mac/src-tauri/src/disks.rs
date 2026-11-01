@@ -87,6 +87,7 @@ pub fn read_volume_json(mount: &Path) -> Result<Option<VolumeJson>, String> {
 }
 
 /// Builds a `Disk` from already-collected filesystem facts.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn build_disk(
     mount: &Path,
     filesystem: &str,
@@ -230,11 +231,24 @@ pub fn list_disks() -> Vec<Disk> {
 
 /// Returns the plugged disk whose mount point is exactly `mount_path`.
 /// Commands that write use this so a page can never make us write elsewhere.
+#[cfg(not(windows))]
 pub fn find_disk(mount_path: &str) -> Option<Disk> {
     let wanted = normalize_mount(mount_path);
     list_disks()
         .into_iter()
         .find(|d| normalize_mount(&d.mount_path) == wanted)
+}
+
+/// Windows: called once per copied file, so only the requested drive letter is asked
+/// (asking every drive would wake sleeping disks and slow each copy).
+#[cfg(windows)]
+pub fn find_disk(mount_path: &str) -> Option<Disk> {
+    let wanted = normalize_mount(mount_path);
+    let b = wanted.as_bytes();
+    if b.len() != 2 || !b[0].is_ascii_uppercase() || b[1] != b':' {
+        return None;
+    }
+    platform::probe(b[0] as char)
 }
 
 #[cfg(windows)]
@@ -346,32 +360,44 @@ mod platform {
         let mut old = 0u32;
         // SAFETY: plain Win32 call with a valid out pointer.
         unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut old) };
-        let sys = system_drive();
         // SAFETY: no arguments.
         let mask = unsafe { GetLogicalDrives() };
         let mut out = Vec::new();
         for i in 0..26u32 {
-            if mask & (1 << i) == 0 {
-                continue;
-            }
-            let letter = (b'A' + i as u8) as char;
-            let root = format!("{letter}:\\");
-            if format!("{letter}:") == sys {
-                continue;
-            }
-            let root_w = wide(&root);
-            // SAFETY: NUL-terminated UTF-16 path.
-            let kind = unsafe { GetDriveTypeW(root_w.as_ptr()) };
-            if kind != DRIVE_REMOVABLE && kind != DRIVE_FIXED {
-                continue;
-            }
-            if let Some(d) = stat(&root, &root_w) {
-                out.push(d);
+            if mask & (1 << i) != 0 {
+                if let Some(d) = check((b'A' + i as u8) as char) {
+                    out.push(d);
+                }
             }
         }
         // SAFETY: restores the previous mode.
         unsafe { SetThreadErrorMode(old, std::ptr::null_mut()) };
         out
+    }
+
+    /// One drive letter, with the same rules as `list`.
+    pub fn probe(letter: char) -> Option<Disk> {
+        let mut old = 0u32;
+        // SAFETY: plain Win32 call with a valid out pointer.
+        unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut old) };
+        let d = check(letter);
+        // SAFETY: restores the previous mode.
+        unsafe { SetThreadErrorMode(old, std::ptr::null_mut()) };
+        d
+    }
+
+    fn check(letter: char) -> Option<Disk> {
+        if format!("{letter}:") == system_drive() {
+            return None;
+        }
+        let root = format!("{letter}:\\");
+        let root_w = wide(&root);
+        // SAFETY: NUL-terminated UTF-16 path.
+        let kind = unsafe { GetDriveTypeW(root_w.as_ptr()) };
+        if kind != DRIVE_REMOVABLE && kind != DRIVE_FIXED {
+            return None;
+        }
+        stat(&root, &root_w)
     }
 
     fn stat(root: &str, root_w: &[u16]) -> Option<Disk> {

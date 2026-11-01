@@ -132,14 +132,16 @@ def archive_plan(request: Request, volume_id: str, max_bytes: int | None = None)
             size = sum(f["size_bytes"] for f in files)
             if not files:
                 continue
-            if total + size > budget:
-                if plan:
-                    break
-                continue  # a single item larger than the budget: skip it
+            if total + size > budget and plan:
+                break
+            # A single item larger than the budget (a long 4K video with a 5 GB batch) goes
+            # alone in its own batch; skipping it would leave it on the server forever.
             total += size
             plan += [{"file_id": f["id"], "item_id": f["item_id"], "sha256": f["sha256"],
                       "size_bytes": f["size_bytes"], "rel_path": drive_rel_path(f["rel_path"]),
                       "url": f"/api/files/{f['id']}/content"} for f in files]
+            if total >= budget:
+                break
     finally:
         conn.close()
     return {"files": plan, "total_bytes": total}

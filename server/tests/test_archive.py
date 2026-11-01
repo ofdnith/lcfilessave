@@ -129,3 +129,16 @@ def test_rel_path_traversal_is_rejected(api, tmp_path):
     res = api.post("/api/archive/verified", json={"volume_id": vol["id"], "copies": [
         {"file_id": f["file_id"], "rel_path": "../../etc/x", "sha256": f["sha256"]}]}).json()
     assert res["rejected"] and not res["accepted"]
+
+
+def test_item_larger_than_the_batch_goes_alone(api, tmp_path):
+    # With a small batch (5 GB by default) a long 4K video is bigger than the whole
+    # batch: it must still be archivable, alone, instead of staying on the server forever.
+    ids = kept_photos(api, tmp_path, n=3)
+    vol = api.post("/api/volumes", json={"capacity_bytes": 2_000_000_000_000, "filesystem": "exfat"}).json()
+    plan = api.get("/api/archive/plan", params={"volume_id": vol["id"], "max_bytes": 1}).json()
+    assert len({f["item_id"] for f in plan["files"]}) == 1
+    assert plan["files"][0]["item_id"] in ids
+    assert plan["total_bytes"] > 1
+    everything = api.get("/api/archive/plan", params={"volume_id": vol["id"]}).json()
+    assert len({f["item_id"] for f in everything["files"]}) == 3

@@ -50,7 +50,7 @@ catálogo continua navegável e buscável mesmo depois que os originais vão par
 | App para Windows e Releases | O app do computador agora também roda no Windows; o GitHub compila Mac e Windows e publica em Releases a cada tag `app-v*` |
 | Entrada com fotos inteiras | A grade da Entrada mostra cada foto no formato dela, sem cortar (botão para voltar aos quadrados; o Acervo também tem) |
 | Modo rápido mais leve | Cartão no formato da foto, prévia leve em vez do original, ações sem esperar o servidor, próximas fotos pré-carregadas, arrastar também com o mouse |
-| Aviso de HD em 5 GB | O lote para HD passou de 80 GB para 5 GB (`archive_batch_gb`) |
+| Aviso de HD em 5 GB | O lote para HD passou de 80 GB para 5 GB (`archive_batch_gb`) em instalações novas; quem já instalou troca a linha `archive_batch_gb` no `acervo.toml`. Um item maior que o lote (vídeo 4K longo) vai sozinho num lote próprio |
 
 **Fase 7:** o modelo CLIP precisa do `onnxruntime`, que não tem versão para o
 Termux/Android; no Snapdragon 680 cada foto levaria segundos. A fila de tarefas

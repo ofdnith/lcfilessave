@@ -30,6 +30,9 @@
   const item = $derived(list.items[0] ?? null);
   const next = $derived(list.items[1] ?? null);
   const progress = $derived(startTotal ? Math.min(100, (doneCount / startTotal) * 100) : 0);
+  // Counted locally: a page fetched while actions are still queued reports a server total
+  // that includes them.
+  const remaining = $derived(startTotal ? Math.max(0, startTotal - doneCount) : list.total);
 
   // --- what to show ------------------------------------------------------------------------
   /** Light image for the card: medium preview, else thumbnail, else (still processing) the preview. */
@@ -77,7 +80,8 @@
   });
 
   $effect(() => {
-    if (list.items.length < 8 && !list.done && !list.loading) void list.more();
+    // Not after an error: each failed attempt flips `loading` and would retry at once, forever.
+    if (list.items.length < 8 && !list.done && !list.loading && !list.error) void list.more();
   });
 
   // --- actions: optimistic, sent in order --------------------------------------------------
@@ -113,6 +117,9 @@
 
   // Discards that can still be undone, newest last.
   let discarded = $state<Item[]>([]);
+  // Discards the server refused. An undo queued right after one of them must not send a
+  // restore (it would fail and hide an item that never left the Entrada).
+  const failedDiscards = new Set<number>();
 
   // The card that just left flies out while the next one is already usable.
   let ghost = $state<{ item: Item; src: string | null; dir: Verdict; key: number } | null>(null);
@@ -122,7 +129,7 @@
 
   function act(action: Verdict) {
     const it = item;
-    if (!it) return;
+    if (!it || closing) return;
     if (action === 'discard' && app.readonly) {
       toast('Fora de casa não dá para descartar (modo seguro).', 'info', undefined, 2500);
       return;
@@ -160,6 +167,7 @@
         const r = await api.actions([it.id], action);
         if (!r.ok.includes(it.id)) throw new Error(r.failed[0]?.error ?? 'Ação não concluída.');
       } catch (e) {
+        if (action === 'discard') failedDiscards.add(it.id);
         discarded = discarded.filter((d) => d.id !== it.id);
         putBack(it);
         toast(`${it.original_name}: ${errorText(e, e instanceof Error ? e.message : 'Ação não concluída.')}`, 'error');
@@ -169,10 +177,11 @@
 
   function undo() {
     const it = discarded[discarded.length - 1];
-    if (!it) return;
+    if (!it || closing) return;
     discarded = discarded.slice(0, -1);
     putBack({ ...it, state: 'inbox' });
     send(async () => {
+      if (failedDiscards.delete(it.id)) return; // never left the Entrada; already on screen
       try {
         const r = await api.actions([it.id], 'restore');
         if (!r.ok.includes(it.id)) throw new Error(r.failed[0]?.error ?? 'Não foi possível desfazer.');
@@ -246,6 +255,14 @@
     dx = e.clientX - sx;
     dy = Math.min(0, e.clientY - sy);
   }
+  /** System gesture, palm rejection…: forget the drag, never act on it. */
+  function cancel(e: PointerEvent) {
+    if (e.pointerId !== pid) return;
+    dragging = false;
+    pid = null;
+    dx = 0;
+    dy = 0;
+  }
   function up(e: PointerEvent) {
     if (!dragging || e.pointerId !== pid) return;
     dragging = false;
@@ -274,7 +291,7 @@
     <div class="prog">
       <div class="bar keep"><span style:width="{progress}%"></span></div>
       <span class="num muted">
-        {num(doneCount)} triados · {num(list.total)} restantes
+        {num(doneCount)} triados · {num(remaining)} restantes
         {#if pending > 0}<span class="saving">· salvando…</span>{/if}
       </span>
     </div>
@@ -289,7 +306,7 @@
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}
-    onpointercancel={up}
+    onpointercancel={cancel}
     role="presentation"
   >
     {#if item}
@@ -377,6 +394,11 @@
       </div>
     {:else if list.loading}
       <p class="muted">Carregando…</p>
+    {:else if list.error}
+      <div class="finished">
+        <p class="error-text">{list.error}</p>
+        <button class="btn" onclick={() => list.more()}>Tentar de novo</button>
+      </div>
     {:else}
       <div class="finished">
         <div class="ok"><Icon name="check" size={34} /></div>

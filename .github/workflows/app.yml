@@ -66,10 +66,18 @@ jobs:
         working-directory: mac
         run: npm ci --no-audit --no-fund
 
-      # The unit tests touch files, HTTP and hashing; they run on both systems.
+      # On Windows the test executables are only built, not run: Tauri attaches the
+      # Common Controls v6 manifest to the app binary only, so a test exe that links the
+      # dialog plugin cannot even start there. The same tests run for real on macOS.
       - name: Testes do app
+        if: runner.os == 'macOS'
         working-directory: mac/src-tauri
         run: cargo test
+
+      - name: Testes do app (só compilar)
+        if: runner.os == 'Windows'
+        working-directory: mac/src-tauri
+        run: cargo test --no-run
 
       - name: Compilar e (em tag) publicar
         uses: tauri-apps/tauri-action@v0
