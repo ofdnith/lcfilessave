@@ -37,6 +37,9 @@ Tutoriais passo a passo de tudo ficam dentro do próprio Acervo, em **Ajuda**
 
 ## Situação
 
+Versão atual: **0.1.0**, a primeira release (veja o [CHANGELOG.md](CHANGELOG.md) e a página
+**Releases** do GitHub, com os instaladores do app para Mac e Windows).
+
 | Fase | O que entrega | Estado |
 |---|---|---|
 | 0 — Fundação | Servidor, catálogo com migrações, `/api/health` | ✅ |
@@ -48,7 +51,7 @@ Tutoriais passo a passo de tudo ficam dentro do próprio Acervo, em **Ajuda**
 | 6 — Busca avançada | Lugar por GPS offline, texto de documentos, OCR só carregando, quase-duplicados (pHash) | ✅ (microSD aposentado em 01/11/2026) |
 | 7 — Opcional | Busca semântica (CLIP) | ⏸ não feita — veja abaixo |
 
-**Versão 0.2 — melhorias:**
+**Segunda leva de melhorias:**
 
 | Melhoria | O que muda |
 |---|---|
@@ -58,7 +61,7 @@ Tutoriais passo a passo de tudo ficam dentro do próprio Acervo, em **Ajuda**
 | Atalhos sem complicação | Token criado pela interface; backup diário com 5 ações; links do iCloud dos atalhos prontos |
 | Avisos no iPhone | Backup atrasado, pouco espaço, lote pronto, Entrada esperando, problema num armazenamento, resumo do backup (Web Push, sem abrir portas) |
 | Migração | `acervo migrar` leva tudo para um mini PC conferindo cada arquivo; instalador para Linux com serviço do sistema |
-| App para Windows e Releases | O app do computador agora também roda no Windows; o GitHub compila Mac e Windows e publica em Releases a cada tag `app-v*` |
+| App para Windows e Releases | O app do computador agora também roda no Windows; o GitHub compila Mac e Windows e publica em Releases a cada tag de versão (`v*`) |
 | Entrada com fotos inteiras | A grade da Entrada mostra cada foto no formato dela, sem cortar (botão para voltar aos quadrados; o Acervo também tem) |
 | Modo rápido mais leve | Cartão no formato da foto, prévia leve em vez do original, ações sem esperar o servidor, próximas fotos pré-carregadas, arrastar também com o mouse |
 | Lote de 5 GB | O lote para o armazenamento passou de 80 GB para 5 GB (`archive_batch_gb`) em instalações novas; quem já instalou troca a linha `archive_batch_gb` no `acervo.toml`. Um item maior que o lote (vídeo 4K longo) vai sozinho num lote próprio |

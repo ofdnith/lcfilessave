@@ -41,9 +41,13 @@ no servidor (`acervo-ctl duckdns`), não há certificado para instalar.
 
 O GitHub compila os dois sozinho (`.github/workflows/app.yml`):
 
-1. Aumente `version` em `mac/src-tauri/tauri.conf.json` (ex.: `0.2.0`).
-2. Crie e envie a tag com o mesmo número: `git tag app-v0.2.0 && git push origin app-v0.2.0`.
-3. Em uns 15 minutos o `.dmg` e o `-setup.exe` aparecem em **Releases**.
+O Acervo inteiro (servidor, interface e app) usa um número de versão só.
+
+1. Aumente o número nos seis lugares: `server/pyproject.toml`, `server/acervo/__init__.py`,
+   `web/package.json`, `mac/package.json`, `mac/src-tauri/Cargo.toml` e
+   `mac/src-tauri/tauri.conf.json` (ex.: `0.2.0`), e escreva o que mudou no `CHANGELOG.md`.
+2. Crie e envie a tag com o mesmo número: `git tag v0.2.0 && git push origin v0.2.0`.
+3. Em uns 15 minutos a release aparece em **Releases**, com o `.dmg` e o `-setup.exe`.
 
 Toda mudança em `mac/` que entra na `main` (ou num pull request) também compila os
 dois; os instaladores ficam como artefatos da execução (aba **Actions** › a execução

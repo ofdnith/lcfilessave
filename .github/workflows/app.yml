@@ -2,8 +2,9 @@
 #
 # - Pushes to main and pull requests that touch the app, and manual runs: build both,
 #   keep the installers as run artifacts (30 days).
-# - A tag "app-vX.Y.Z" (same version as mac/src-tauri/tauri.conf.json): build both and
-#   publish them on the GitHub Releases page.
+# - A release tag "vX.Y.Z" (same version as mac/src-tauri/tauri.conf.json, the server
+#   and the web app; see CHANGELOG.md): build both and publish them on the GitHub
+#   Releases page. Old-style "app-vX.Y.Z" tags still work.
 #
 # The apps are not signed with paid certificates: macOS gets an ad-hoc signature
 # ("Abrir Mesmo Assim" in Privacidade e Segurança the first time) and Windows shows the
@@ -13,7 +14,7 @@ name: App (Mac e Windows)
 on:
   push:
     branches: [main]
-    tags: ["app-v*"]
+    tags: ["v*", "app-v*"]
     paths:
       - "mac/**"
       - ".github/workflows/app.yml"
@@ -92,9 +93,13 @@ jobs:
           projectPath: mac
           tauriScript: npx tauri
           args: ${{ matrix.args }}
-          tagName: ${{ startsWith(github.ref, 'refs/tags/app-v') && github.ref_name || '' }}
-          releaseName: "Acervo para Mac e Windows ${{ github.ref_name }}"
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: "Acervo ${{ github.ref_name }}"
           releaseBody: |
+            O que mudou: veja o `CHANGELOG.md`.
+
+            **Servidor (Realme):** no Termux, rode `acervo-ctl atualizar` (os dados ficam).
+
             **Mac:** baixe o `.dmg`, abra e arraste o Acervo para Aplicativos. Na primeira vez,
             Ajustes do Sistema › Privacidade e Segurança › **Abrir Mesmo Assim**.
 
